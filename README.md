@@ -13,9 +13,10 @@ An Arduino library demo and reference project for the **Almocn 1602 LCD Keypad S
 5. [Usage](#usage)
 6. [Demo Sketch Walkthrough](#demo-sketch-walkthrough)
 7. [Menu Sketch Walkthrough](#menu-sketch-walkthrough)
-8. [Troubleshooting](#troubleshooting)
-9. [Contributing](#contributing)
-10. [License](#license)
+8. [Alarm Clock Sketch Walkthrough](#alarm-clock-sketch-walkthrough)
+9. [Troubleshooting](#troubleshooting)
+10. [Contributing](#contributing)
+11. [License](#license)
 
 ---
 
@@ -27,6 +28,7 @@ An Arduino library demo and reference project for the **Almocn 1602 LCD Keypad S
 - **Automatic backlight timeout** to save power when the board is idle
 - **Debounced button reading** for reliable key detection
 - **Runtime backlight menu** (`Menu/Menu.ino`) — change the timeout duration and enable/disable auto-off on-device without recompiling
+- **Alarm clock** (`AlarmClock/AlarmClock.ino`) — manual time setting, configurable alarm with LCD flash and buzzer output on pin D3, snooze, and enable/disable toggle
 - Compatible with **Arduino Uno, Nano, Mega**, and other 5 V AVR boards
 
 ---
@@ -107,10 +109,11 @@ Or download the ZIP from GitHub and extract it.
 
 ### 4. Open a sketch
 
-| Sketch | File | Description |
-|--------|------|-------------|
-| Demo   | `Demo/Demo.ino`   | Basic button display and fixed 5 s backlight timeout |
-| Menu   | `Menu/Menu.ino`   | Runtime menu to set timeout and toggle auto-off |
+| Sketch     | File                        | Description |
+|------------|-----------------------------|-------------|
+| Demo       | `Demo/Demo.ino`             | Basic button display and fixed 5 s backlight timeout |
+| Menu       | `Menu/Menu.ino`             | Runtime menu to set timeout and toggle auto-off |
+| AlarmClock | `AlarmClock/AlarmClock.ino` | Bedside alarm clock with manual time setting, alarm, snooze, and buzzer |
 
 Open whichever sketch you'd like to try in the Arduino IDE.
 
@@ -167,6 +170,66 @@ Auto-Off:
 
 - The backlight stays on while you are in the menu.
 - Pressing any button while the backlight is off wakes it; that press is then consumed so you don't accidentally navigate.
+
+### Alarm Clock sketch
+
+After uploading `AlarmClock/AlarmClock.ino`, the LCD shows the current time on the first row and the alarm setting on the second row:
+
+```
+12:34:56 [SET]
+ALM 06:30  ON
+```
+
+Press **SELECT** to enter the settings menu. Five pages are available, navigated with **LEFT / RIGHT**:
+
+```
+Set Clock Hour:
+< 12 > UP/DN >
+```
+
+```
+Set Clock Min:
+< 34 > UP/DN >
+```
+
+```
+Set Alarm Hour:
+< 06 > UP/DN >
+```
+
+```
+Set Alarm Min:
+< 30 > UP/DN >
+```
+
+```
+Alarm:
+ENABLED  UP/DN
+```
+
+| Key | Action |
+|-----|--------|
+| **SELECT** (normal view) | Enter the settings menu |
+| **RIGHT** | Advance to the next settings page |
+| **LEFT** | Go back to the previous settings page (or return to clock from first page) |
+| **UP / DOWN** | Increase / decrease the displayed value (or toggle alarm on/off on the last page) |
+| **SELECT** (in menu) | Save the current value and return to the clock |
+
+When the alarm fires the display switches to:
+
+```
+** ALARM TIME **
+SEL=off  RT=snz
+```
+
+The backlight flashes and pin **D3** toggles HIGH/LOW to drive a buzzer (connect a passive buzzer between D3 and GND).
+
+| Key | Action |
+|-----|--------|
+| **SELECT** | Dismiss the alarm |
+| **RIGHT** | Snooze — silences the alarm and re-triggers after 5 minutes |
+
+> **Hardware note:** The UNO has no real-time clock. Time is tracked with `millis()`, so the clock resets to 00:00:00 each time the board is powered on. Set the correct time after every power cycle using the settings menu.
 
 ### Adapting the sketch to your project
 
@@ -267,6 +330,66 @@ const unsigned long LOOP_DELAY_MS         = 80;   // display refresh interval
 
 ---
 
+## Alarm Clock Sketch Walkthrough
+
+```
+AlarmClock/
+└── AlarmClock.ino   — standalone Arduino sketch
+```
+
+`AlarmClock.ino` turns the shield into a bedside alarm clock. Because the Arduino Uno has no real-time clock module or network connection, time is tracked entirely in software using `millis()`.
+
+### Key functions
+
+| Function | Purpose |
+|----------|---------|
+| `readButton(int adc)` | Same ADC-to-enum mapping as `Demo.ino` and `Menu.ino` |
+| `getPressEvent()` | Rising-edge button detector — fires once per physical press |
+| `setBacklight(bool on)` | Controls backlight via `BACKLIGHT_PIN` |
+| `tickClock()` | Increments `clockS`, `clockM`, `clockH` once per second using `millis()` |
+| `printTwoDigits(int val)` | Prints a zero-padded two-digit integer to the LCD |
+| `drawClock()` | Renders the normal clock view |
+| `drawAlarming()` | Renders the alarm-firing view |
+| `drawMenuRow0(label)` | Prints a 16-character header row for menu pages |
+| `drawMenuRow1(val)` | Prints the value row (`< HH > UP/DN >`) for menu pages |
+| `drawMenuAlarmEn()` | Renders the alarm enable/disable menu page |
+| `setup()` | Initialises pins, LCD, and shows a splash screen |
+| `loop()` | Ticks the clock, checks the alarm, and runs the state machine |
+
+### Application state machine
+
+| State | Description |
+|-------|-------------|
+| `STATE_CLOCK` | Normal view — shows `HH:MM:SS` and alarm summary |
+| `STATE_ALARMING` | Alarm is firing — flashes backlight, toggles buzzer on D3 |
+| `STATE_MENU_TIME_H` | Settings page 1 — adjust clock hour |
+| `STATE_MENU_TIME_M` | Settings page 2 — adjust clock minute |
+| `STATE_MENU_ALARM_H` | Settings page 3 — adjust alarm hour |
+| `STATE_MENU_ALARM_M` | Settings page 4 — adjust alarm minute |
+| `STATE_MENU_ALARM_EN` | Settings page 5 — enable or disable the alarm |
+
+### Alarm behaviour
+
+- The alarm fires once per day when `clockH == alarmH` and `clockM == alarmM` at the start of that minute (i.e. when `clockS` rolls to `0`).
+- While firing, the backlight flashes every 500 ms and pin **D3** toggles every 500 ms.
+- Pressing **SELECT** dismisses the alarm for that minute.
+- Pressing **RIGHT** snoozes: the alarm time is shifted forward by `SNOOZE_MINUTES` (default 5) and the alarm fires again at the new time.
+
+### Key constants
+
+```cpp
+const int  BUZZER_PIN       = 3;    // buzzer between D3 and GND
+const int  SNOOZE_MINUTES   = 5;    // snooze duration in minutes
+const unsigned long FLASH_INTERVAL_MS = 500; // backlight flash half-period
+const unsigned long BUZZ_INTERVAL_MS  = 500; // buzzer toggle half-period
+```
+
+### Wiring the buzzer
+
+Connect a passive piezo buzzer (or a transistor-driven active buzzer) between **D3** and **GND**. No additional components are needed for a passive piezo; for louder output use an NPN transistor (e.g. 2N2222) with a 1 kΩ base resistor.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -277,6 +400,8 @@ const unsigned long LOOP_DELAY_MS         = 80;   // display refresh interval
 | Buttons read the wrong value | ADC thresholds don't match your board | Print raw ADC values in `loop()` and update the thresholds in `readButton()` |
 | Upload fails | Wrong board/port selected | Re-check **Tools → Board** and **Tools → Port** |
 | `LiquidCrystal.h` not found | Library not installed | Install via **Sketch → Include Library → Manage Libraries…** |
+| Buzzer silent when alarm fires | No buzzer wired to D3 | Connect a passive piezo between D3 and GND |
+| Clock drifts noticeably | `millis()` accuracy limitation (no RTC) | Re-set the time after long periods; consider adding a DS3231 RTC module for precision |
 
 ---
 
