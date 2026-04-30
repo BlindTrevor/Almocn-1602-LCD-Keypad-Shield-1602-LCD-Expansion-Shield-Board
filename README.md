@@ -12,9 +12,10 @@ An Arduino library demo and reference project for the **Almocn 1602 LCD Keypad S
 4. [Installation](#installation)
 5. [Usage](#usage)
 6. [Demo Sketch Walkthrough](#demo-sketch-walkthrough)
-7. [Troubleshooting](#troubleshooting)
-8. [Contributing](#contributing)
-9. [License](#license)
+7. [Menu Sketch Walkthrough](#menu-sketch-walkthrough)
+8. [Troubleshooting](#troubleshooting)
+9. [Contributing](#contributing)
+10. [License](#license)
 
 ---
 
@@ -25,6 +26,7 @@ An Arduino library demo and reference project for the **Almocn 1602 LCD Keypad S
 - **Software-controlled backlight** on pin D10 with configurable active level (HIGH or LOW)
 - **Automatic backlight timeout** to save power when the board is idle
 - **Debounced button reading** for reliable key detection
+- **Runtime backlight menu** (`Menu/Menu.ino`) — change the timeout duration and enable/disable auto-off on-device without recompiling
 - Compatible with **Arduino Uno, Nano, Mega**, and other 5 V AVR boards
 
 ---
@@ -103,9 +105,14 @@ git clone https://github.com/BlindTrevor/Almocn-1602-LCD-Keypad-Shield-1602-LCD-
 
 Or download the ZIP from GitHub and extract it.
 
-### 4. Open the sketch
+### 4. Open a sketch
 
-Open `Demo/Demo.ino` in the Arduino IDE.
+| Sketch | File | Description |
+|--------|------|-------------|
+| Demo   | `Demo/Demo.ino`   | Basic button display and fixed 5 s backlight timeout |
+| Menu   | `Menu/Menu.ino`   | Runtime menu to set timeout and toggle auto-off |
+
+Open whichever sketch you'd like to try in the Arduino IDE.
 
 ### 5. Upload
 
@@ -118,7 +125,9 @@ Open `Demo/Demo.ino` in the Arduino IDE.
 
 ## Usage
 
-After uploading, the LCD shows the currently pressed button name on the first row and the backlight state on the second row:
+### Demo sketch
+
+After uploading `Demo/Demo.ino`, the LCD shows the currently pressed button name on the first row and the backlight state on the second row:
 
 ```
 Btn: RIGHT
@@ -127,6 +136,37 @@ Backlight: ON
 
 - Press any button to wake the backlight if it has timed out.
 - If no button is pressed for **5 seconds** the backlight turns off automatically.
+
+### Menu sketch
+
+After uploading `Menu/Menu.ino`, the LCD starts in the same normal view but shows a menu hint on the second row:
+
+```
+Btn: NONE
+BL:ON  [MENU]
+```
+
+Press **SELECT** to open the settings menu. Two items are available, navigated with **LEFT / RIGHT**:
+
+```
+Timeout:
+< 5 sec UP/DN >
+```
+
+```
+Auto-Off:
+ ENABLED  UP/DN
+```
+
+| Key | Action |
+|-----|--------|
+| **SELECT** (normal view) | Enter the menu |
+| **LEFT / RIGHT** | Move between menu items |
+| **UP / DOWN** | Change the highlighted setting |
+| **SELECT** (in menu) | Save and return to normal view |
+
+- The backlight stays on while you are in the menu.
+- Pressing any button while the backlight is off wakes it; that press is then consumed so you don't accidentally navigate.
 
 ### Adapting the sketch to your project
 
@@ -168,6 +208,62 @@ Key functions in `Demo.ino`:
 | `setBacklight(bool on)` | Writes to `BACKLIGHT_PIN` using the configured active level |
 | `setup()` | Initialises the LCD, backlight, and prints a startup message |
 | `loop()` | Debounces button input, manages the backlight timeout, and refreshes the display |
+
+---
+
+## Menu Sketch Walkthrough
+
+```
+Menu/
+└── Menu.ino   — standalone Arduino sketch
+```
+
+`Menu.ino` extends `Demo.ino` with a runtime settings menu so you can change the backlight behaviour without recompiling.
+
+### Key functions
+
+| Function | Purpose |
+|----------|---------|
+| `readButton(int adc)` | Same ADC-to-enum mapping as `Demo.ino` |
+| `getPressEvent()` | Edge-detecting wrapper around `readButton` — returns the button only on the rising edge so each physical press fires exactly once |
+| `setBacklight(bool on)` | Identical to `Demo.ino` |
+| `drawNormal(Button)` | Renders the normal status view |
+| `drawMenuTimeout()` | Renders the timeout selection screen |
+| `drawMenuAutoOff()` | Renders the auto-off toggle screen |
+| `setup()` | Initialises the LCD and shows a brief splash screen |
+| `loop()` | Runs the menu state machine and backlight auto-off logic |
+
+### Menu state machine
+
+| State | Description |
+|-------|-------------|
+| `STATE_NORMAL` | Default view — shows last pressed button and backlight status |
+| `STATE_MENU_TIMEOUT` | Timeout picker — UP/DOWN cycles through seven presets |
+| `STATE_MENU_AUTOOFF` | Auto-off toggle — UP/DOWN flips between ENABLED and DISABLED |
+
+### Timeout presets
+
+| Label  | Duration  |
+|--------|-----------|
+| 5 sec  | 5 000 ms  |
+| 10 sec | 10 000 ms |
+| 15 sec | 15 000 ms |
+| 30 sec | 30 000 ms |
+| 1 min  | 60 000 ms |
+| 2 min  | 120 000 ms |
+| 5 min  | 300 000 ms |
+
+### Key constants
+
+```cpp
+// Adjust BACKLIGHT_ON_LEVEL only; OFF level is derived automatically
+const bool BACKLIGHT_ON_LEVEL  = HIGH;
+const bool BACKLIGHT_OFF_LEVEL = !BACKLIGHT_ON_LEVEL;
+
+const unsigned long DEBOUNCE_DELAY_MS     = 40;   // button stability window
+const unsigned long SPLASH_SCREEN_DELAY_MS = 1200; // startup message duration
+const unsigned long LOOP_DELAY_MS         = 80;   // display refresh interval
+```
 
 ---
 
