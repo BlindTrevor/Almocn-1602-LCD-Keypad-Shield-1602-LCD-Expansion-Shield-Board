@@ -10,7 +10,10 @@
 //   Row 0:  *  WORK DONE!  *   or   * BREAK DONE!  *
 //   Row 1:  SEL=next RT=rst
 //   Backlight flashes every 500 ms.
-//   Pin 3 (BUZZER_PIN) toggles every 500 ms.
+//   Buzzer behaviour depends on the Buzzer Mode setting:
+//     OFF  — buzzer silent.
+//     SYNC — pin 3 toggles in time with the backlight flash (every 500 ms).
+//     BEEP — two short beeps every 2 s (watch-alarm style).
 //   SELECT advances to the next period (work → break, break → work).
 //   RIGHT resets everything to the start.
 //
@@ -23,6 +26,7 @@
 //   Page 1 — Work duration    (1 – 60 min, default 25)
 //   Page 2 — Short break      (1 – 30 min, default 5)
 //   Page 3 — Long break       (1 – 60 min, default 15)
+//   Page 4 — Buzzer mode      (OFF / SYNC / BEEP, default SYNC)
 //
 // Button mapping (normal view):
 //   SELECT — start / pause / resume the countdown
@@ -52,13 +56,29 @@ const unsigned long DEBOUNCE_MS       = 40;   // button stability window (ms)
 const unsigned long LOOP_DELAY_MS     = 80;   // display refresh interval (ms)
 const unsigned long SPLASH_MS         = 1200; // startup splash duration (ms)
 const unsigned long FLASH_INTERVAL_MS  = 500;  // backlight flash half-period (ms)
-const unsigned long BUZZ_INTERVAL_MS   = 500;  // buzzer toggle half-period (ms)
+const unsigned long BUZZ_INTERVAL_MS   = 500;  // SYNC mode: buzzer toggle half-period (ms)
+
+// BEEP mode timing — two short beeps repeated every BEEP_CYCLE_MS.
+const unsigned long BEEP_ON_MS    = 120;  // duration of each beep (ms)
+const unsigned long BEEP_GAP_MS   = 120;  // gap between the two beeps (ms)
+const unsigned long BEEP_CYCLE_MS = 2000; // full beep-beep repetition period (ms)
 
 // Hold-to-repeat for UP / DOWN in the settings menu.
 const unsigned long HOLD_DELAY_MS      = 500;  // pause before repeat begins (ms)
 const unsigned long HOLD_REPEAT_MS     = 200;  // slow repeat interval (ms)
 const unsigned long HOLD_FAST_MS       = 80;   // fast repeat interval (ms)
 const unsigned long HOLD_FAST_AFTER_MS = 2000; // ms of holding before switching to fast rate
+
+// ---------------------------------------------------------------------------
+// Buzzer mode
+// ---------------------------------------------------------------------------
+enum BuzzerMode {
+  BUZZ_OFF   = 0,  // buzzer silent
+  BUZZ_FLASH = 1,  // toggle in sync with the backlight flash
+  BUZZ_BEEP  = 2   // watch-alarm style: two short beeps every BEEP_CYCLE_MS
+};
+const int      BUZZ_MODE_COUNT  = 3;             // total number of BuzzerMode values
+const BuzzerMode DEFAULT_BUZZ_MODE = BUZZ_FLASH;
 
 // ---------------------------------------------------------------------------
 // Pomodoro defaults and limits
@@ -75,15 +95,16 @@ const int POMODOROS_PER_LONG = 4;  // long break after every Nth completed work 
 // ---------------------------------------------------------------------------
 // EEPROM layout
 // A single magic byte at address 0 guards against reading uninitialised EEPROM.
-// Addresses 1-3 store the three adjustable durations as single bytes (minutes).
+// Addresses 1-4 store the four adjustable settings as single bytes.
 // ---------------------------------------------------------------------------
 const uint8_t EEPROM_MAGIC       = 0xA7; // change this value to force a reset to defaults
 const int     EEPROM_ADDR_MAGIC  = 0;
 const int     EEPROM_ADDR_WORK   = 1;
 const int     EEPROM_ADDR_SHORT  = 2;
 const int     EEPROM_ADDR_LONG   = 3;
+const int     EEPROM_ADDR_BUZZ   = 4;   // BuzzerMode (0=OFF, 1=FLASH, 2=BEEP)
 
-// Load workMin / shortMin / longMin from EEPROM.
+// Load workMin / shortMin / longMin / buzzerMode from EEPROM.
 // Falls back to compile-time defaults when the magic byte is absent or wrong.
 void loadSettings() {
   if (EEPROM.read(EEPROM_ADDR_MAGIC) != EEPROM_MAGIC) return; // use defaults
@@ -91,14 +112,16 @@ void loadSettings() {
   const uint8_t w = EEPROM.read(EEPROM_ADDR_WORK);
   const uint8_t s = EEPROM.read(EEPROM_ADDR_SHORT);
   const uint8_t l = EEPROM.read(EEPROM_ADDR_LONG);
+  const uint8_t b = EEPROM.read(EEPROM_ADDR_BUZZ);
 
   // Validate ranges — corrupt data reverts to defaults for that field.
-  workMin  = (w >= MIN_DURATION && w <= MAX_WORK_MIN)  ? w : DEFAULT_WORK_MIN;
-  shortMin = (s >= MIN_DURATION && s <= MAX_SHORT_MIN) ? s : DEFAULT_SHORT_MIN;
-  longMin  = (l >= MIN_DURATION && l <= MAX_LONG_MIN)  ? l : DEFAULT_LONG_MIN;
+  workMin    = (w >= MIN_DURATION && w <= MAX_WORK_MIN)  ? w : DEFAULT_WORK_MIN;
+  shortMin   = (s >= MIN_DURATION && s <= MAX_SHORT_MIN) ? s : DEFAULT_SHORT_MIN;
+  longMin    = (l >= MIN_DURATION && l <= MAX_LONG_MIN)  ? l : DEFAULT_LONG_MIN;
+  buzzerMode = (b < (uint8_t)BUZZ_MODE_COUNT) ? (BuzzerMode)b : DEFAULT_BUZZ_MODE;
 }
 
-// Persist workMin / shortMin / longMin to EEPROM.
+// Persist workMin / shortMin / longMin / buzzerMode to EEPROM.
 // EEPROM.update() only writes a byte when its value has changed,
 // reducing wear on cells rated for ~100 000 write cycles.
 void saveSettings() {
@@ -106,6 +129,7 @@ void saveSettings() {
   EEPROM.update(EEPROM_ADDR_WORK,  (uint8_t)workMin);
   EEPROM.update(EEPROM_ADDR_SHORT, (uint8_t)shortMin);
   EEPROM.update(EEPROM_ADDR_LONG,  (uint8_t)longMin);
+  EEPROM.update(EEPROM_ADDR_BUZZ,  (uint8_t)buzzerMode);
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +152,8 @@ enum AppState {
   STATE_ALERT,       // period just ended — flashing / beeping
   STATE_MENU_WORK,   // settings: adjust work duration
   STATE_MENU_SHORT,  // settings: adjust short-break duration
-  STATE_MENU_LONG    // settings: adjust long-break duration
+  STATE_MENU_LONG,   // settings: adjust long-break duration
+  STATE_MENU_BUZZ    // settings: choose buzzer mode
 };
 
 // ---------------------------------------------------------------------------
@@ -137,6 +162,7 @@ enum AppState {
 int        workMin       = DEFAULT_WORK_MIN;
 int        shortMin      = DEFAULT_SHORT_MIN;
 int        longMin       = DEFAULT_LONG_MIN;
+BuzzerMode buzzerMode    = DEFAULT_BUZZ_MODE;
 int        pomodoroCount = 0;
 PeriodType currentPeriod = PERIOD_WORK;
 AppState   appState      = STATE_IDLE;
@@ -147,7 +173,8 @@ long       secsRemaining = (long)DEFAULT_WORK_MIN * 60;
 unsigned long timerLastTickMs = 0;
 
 // Temporary values used only while inside the settings menu.
-int editWork, editShort, editLong;
+int        editWork, editShort, editLong;
+BuzzerMode editBuzz;
 
 // ---------------------------------------------------------------------------
 // Button reading (identical mapping to Demo.ino / Menu.ino / AlarmClock.ino)
@@ -324,13 +351,26 @@ void drawMenuRow0(const char* label) {
   lcd.print(label);
 }
 
-// Settings menu value row.
+// Settings menu value row for duration pages.
 // Format: "< NN min UP/DN  "  (2 + 2 + 12 = 16 chars)
 void drawMenuRow1(int val) {
   lcd.setCursor(0, 1);
   lcd.print("< ");           // 2 chars
   printTwoDigits(val);       // 2 chars
   lcd.print(" min UP/DN  "); // 12 chars  — row 1 total: 16
+}
+
+// Settings menu value row for the buzzer-mode page.
+// Format: "< OFF    UP/DN  "  (2 + 7 + 7 = 16 chars)
+void drawMenuRowBuzz(BuzzerMode mode) {
+  lcd.setCursor(0, 1);
+  lcd.print("< ");
+  switch (mode) {
+    case BUZZ_OFF:   lcd.print("OFF    "); break; // 7 chars
+    case BUZZ_FLASH: lcd.print("SYNC   "); break; // 7 chars
+    case BUZZ_BEEP:  lcd.print("BEEP   "); break; // 7 chars
+  }
+  lcd.print("UP/DN  ");                           // 7 chars — row 1 total: 16
 }
 
 // ---------------------------------------------------------------------------
@@ -389,6 +429,7 @@ void loop() {
           editWork  = workMin;
           editShort = shortMin;
           editLong  = longMin;
+          editBuzz  = buzzerMode;
           appState  = STATE_MENU_WORK;
           lcd.clear();
           break;
@@ -438,14 +479,31 @@ void loop() {
         setBacklight(!backlightIsOn);
       }
 
-      // Toggle buzzer (pin 3)
-      static unsigned long lastBuzzMs = 0;
-      static bool          buzzerOn   = false;
-      if (now - lastBuzzMs >= BUZZ_INTERVAL_MS) {
-        lastBuzzMs = now;
-        buzzerOn   = !buzzerOn;
-        digitalWrite(BUZZER_PIN, buzzerOn ? HIGH : LOW);
+      // Drive buzzer according to buzzerMode
+      static unsigned long lastBuzzMs      = 0;
+      static unsigned long lastBuzzCycleMs = 0;
+      static bool          buzzerOn        = false;
+      if (buzzerMode == BUZZ_FLASH) {
+        if (now - lastBuzzMs >= BUZZ_INTERVAL_MS) {
+          lastBuzzMs = now;
+          buzzerOn   = !buzzerOn;
+          digitalWrite(BUZZER_PIN, buzzerOn ? HIGH : LOW);
+        }
+      } else if (buzzerMode == BUZZ_BEEP) {
+        unsigned long elapsed = now - lastBuzzCycleMs;
+        if (elapsed >= BEEP_CYCLE_MS) {
+          lastBuzzCycleMs = now;
+          elapsed = 0;
+        }
+        const bool wantOn = (elapsed < BEEP_ON_MS) ||
+                            (elapsed >= BEEP_ON_MS + BEEP_GAP_MS &&
+                             elapsed <  2UL * BEEP_ON_MS + BEEP_GAP_MS);
+        if (wantOn != buzzerOn) {
+          buzzerOn = wantOn;
+          digitalWrite(BUZZER_PIN, buzzerOn ? HIGH : LOW);
+        }
       }
+      // BUZZ_OFF: buzzer stays silent
 
       drawAlert();
 
@@ -485,9 +543,10 @@ void loop() {
           break;
         case BTN_SELECT:
           // Save all pages and return to IDLE.
-          workMin  = editWork;
-          shortMin = editShort;
-          longMin  = editLong;
+          workMin    = editWork;
+          shortMin   = editShort;
+          longMin    = editLong;
+          buzzerMode = editBuzz;
           saveSettings();
           resetTimer();
           appState = STATE_IDLE;
@@ -513,9 +572,10 @@ void loop() {
           lcd.clear();
           break;
         case BTN_SELECT:
-          workMin  = editWork;
-          shortMin = editShort;
-          longMin  = editLong;
+          workMin    = editWork;
+          shortMin   = editShort;
+          longMin    = editLong;
+          buzzerMode = editBuzz;
           saveSettings();
           resetTimer();
           appState = STATE_IDLE;
@@ -537,11 +597,15 @@ void loop() {
           lcd.clear();
           break;
         case BTN_RIGHT:
+          // Advance to the buzzer-mode page.
+          appState = STATE_MENU_BUZZ;
+          lcd.clear();
+          break;
         case BTN_SELECT:
-          // RIGHT on the last page saves and exits, same as SELECT.
-          workMin  = editWork;
-          shortMin = editShort;
-          longMin  = editLong;
+          workMin    = editWork;
+          shortMin   = editShort;
+          longMin    = editLong;
+          buzzerMode = editBuzz;
           saveSettings();
           resetTimer();
           appState = STATE_IDLE;
@@ -551,6 +615,37 @@ void loop() {
       }
       drawMenuRow0("Long Break:     "); // 16 chars
       drawMenuRow1(editLong);
+      break;
+
+    // ---- MENU: Buzzer mode --------------------------------------------------
+    case STATE_MENU_BUZZ:
+      switch (pressed) {
+        case BTN_UP:
+          editBuzz = (BuzzerMode)((editBuzz + 1) % BUZZ_MODE_COUNT);
+          break;
+        case BTN_DOWN:
+          editBuzz = (BuzzerMode)((editBuzz + BUZZ_MODE_COUNT - 1) % BUZZ_MODE_COUNT);
+          break;
+        case BTN_LEFT:
+          appState = STATE_MENU_LONG;
+          lcd.clear();
+          break;
+        case BTN_RIGHT:
+        case BTN_SELECT:
+          // RIGHT on the last page saves and exits, same as SELECT.
+          workMin    = editWork;
+          shortMin   = editShort;
+          longMin    = editLong;
+          buzzerMode = editBuzz;
+          saveSettings();
+          resetTimer();
+          appState = STATE_IDLE;
+          lcd.clear();
+          break;
+        default: break;
+      }
+      drawMenuRow0("Buzzer Mode:    "); // 16 chars
+      drawMenuRowBuzz(editBuzz);
       break;
   }
 

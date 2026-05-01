@@ -272,7 +272,7 @@ or, at the end of a break:
 SEL=next RT=rst
 ```
 
-The backlight flashes every 500 ms and pin **D3** toggles to drive a buzzer.
+The backlight flashes every 500 ms; the buzzer behaviour depends on the **Buzzer Mode** setting (see Settings menu below).
 
 | Key | Action |
 |-----|--------|
@@ -295,6 +295,19 @@ Short Break:
 Long Break:
 < 15 min UP/DN
 ```
+
+```
+Buzzer Mode:
+< SYNC   UP/DN
+```
+
+The **Buzzer Mode** page cycles through three options with UP / DOWN:
+
+| Display | Behaviour |
+|---------|-----------|
+| `OFF`  | Buzzer silent — only the backlight flashes |
+| `SYNC` | Buzzer toggles every 500 ms in time with the backlight flash (default) |
+| `BEEP` | Two short beeps every 2 s, watch-alarm style |
 
 | Key | Action |
 |-----|--------|
@@ -481,8 +494,8 @@ PomodoroTimer/
 | `getButtonEvent()` | Button event detector — fires once per press for all buttons; fires repeatedly at an accelerating rate while UP / DOWN are held |
 | `setBacklight(bool on)` | Controls backlight via `BACKLIGHT_PIN` |
 | `tickTimer()` | Decrements `secsRemaining` by 1 once per second using `millis()` |
-| `loadSettings()` | Reads work/short/long durations from EEPROM; falls back to compile-time defaults on first boot or if the magic byte is wrong |
-| `saveSettings()` | Writes the three durations to EEPROM using `EEPROM.update()` (write-only-if-changed) |
+| `loadSettings()` | Reads work/short/long durations and buzzer mode from EEPROM; falls back to compile-time defaults on first boot or if the magic byte is wrong |
+| `saveSettings()` | Writes the four settings to EEPROM using `EEPROM.update()` (write-only-if-changed) |
 | `loadPeriodTime()` | Sets `secsRemaining` to the configured duration for `currentPeriod` |
 | `advancePeriod()` | Increments the pomodoro count (on work completion) and switches to the next period |
 | `resetTimer()` | Clears the pomodoro count and restarts from a fresh work session |
@@ -491,7 +504,8 @@ PomodoroTimer/
 | `drawTimer()` | Renders the normal timer view (IDLE / RUNNING / PAUSED) |
 | `drawAlert()` | Renders the end-of-period alert view |
 | `drawMenuRow0(label)` | Prints a 16-character header row for settings pages |
-| `drawMenuRow1(val)` | Prints the value row (`< NN min UP/DN  `) for settings pages |
+| `drawMenuRow1(val)` | Prints the value row (`< NN min UP/DN  `) for duration settings pages |
+| `drawMenuRowBuzz(mode)` | Prints the value row (`< SYNC   UP/DN  ` etc.) for the buzzer-mode page |
 | `setup()` | Initialises pins, LCD, and shows a splash screen |
 | `loop()` | Ticks the countdown, checks for period completion, and runs the state machine |
 
@@ -502,10 +516,11 @@ PomodoroTimer/
 | `STATE_IDLE` | Timer ready — shows countdown at period start; SELECT starts it |
 | `STATE_RUNNING` | Countdown active — SELECT pauses, RIGHT resets |
 | `STATE_PAUSED` | Countdown frozen — SELECT resumes, RIGHT resets |
-| `STATE_ALERT` | Period ended — backlight flashes, buzzer beeps; SELECT advances, RIGHT resets |
+| `STATE_ALERT` | Period ended — backlight flashes, buzzer fires per mode; SELECT advances, RIGHT resets |
 | `STATE_MENU_WORK` | Settings page 1 — adjust work duration (1–60 min) |
 | `STATE_MENU_SHORT` | Settings page 2 — adjust short-break duration (1–30 min) |
 | `STATE_MENU_LONG` | Settings page 3 — adjust long-break duration (1–60 min) |
+| `STATE_MENU_BUZZ` | Settings page 4 — choose buzzer mode (OFF / SYNC / BEEP) |
 
 ### Period sequence
 
@@ -529,7 +544,10 @@ const int DEFAULT_LONG_MIN   = 15;  // default long break length (minutes)
 const int POMODOROS_PER_LONG = 4;   // work sessions before a long break
 const int BUZZER_PIN         = 3;   // buzzer between D3 and GND
 const unsigned long FLASH_INTERVAL_MS  = 500;  // backlight flash half-period
-const unsigned long BUZZ_INTERVAL_MS   = 500;  // buzzer toggle half-period
+const unsigned long BUZZ_INTERVAL_MS   = 500;  // SYNC mode: buzzer toggle half-period
+const unsigned long BEEP_ON_MS    = 120;  // BEEP mode: duration of each beep
+const unsigned long BEEP_GAP_MS   = 120;  // BEEP mode: gap between the two beeps
+const unsigned long BEEP_CYCLE_MS = 2000; // BEEP mode: full repetition period
 const unsigned long HOLD_DELAY_MS      = 500;  // pause before UP/DOWN repeat begins
 const unsigned long HOLD_REPEAT_MS     = 200;  // slow repeat interval
 const unsigned long HOLD_FAST_MS       = 80;   // fast repeat interval
@@ -538,7 +556,7 @@ const unsigned long HOLD_FAST_AFTER_MS = 2000; // switch to fast rate after this
 
 ### EEPROM persistence
 
-The three adjustable durations (work, short break, long break) are saved to internal EEPROM whenever the settings menu is confirmed. They are restored automatically on every power-on, so your custom timings survive resets and power cycles.
+The four adjustable settings (work, short break, long break, buzzer mode) are saved to internal EEPROM whenever the settings menu is confirmed. They are restored automatically on every power-on, so your custom settings survive resets and power cycles.
 
 | EEPROM address | Content |
 |----------------|---------|
@@ -546,6 +564,7 @@ The three adjustable durations (work, short break, long break) are saved to inte
 | 1 | Work duration (minutes) |
 | 2 | Short-break duration (minutes) |
 | 3 | Long-break duration (minutes) |
+| 4 | Buzzer mode (`0`=OFF, `1`=SYNC, `2`=BEEP) |
 
 `saveSettings()` uses `EEPROM.update()`, which only writes a byte when its stored value has changed. This minimises wear on EEPROM cells (rated for approximately 100 000 write cycles).
 
