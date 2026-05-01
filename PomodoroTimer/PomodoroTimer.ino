@@ -104,34 +104,6 @@ const int     EEPROM_ADDR_SHORT  = 2;
 const int     EEPROM_ADDR_LONG   = 3;
 const int     EEPROM_ADDR_BUZZ   = 4;   // BuzzerMode (0=OFF, 1=FLASH, 2=BEEP)
 
-// Load workMin / shortMin / longMin / buzzerMode from EEPROM.
-// Falls back to compile-time defaults when the magic byte is absent or wrong.
-void loadSettings() {
-  if (EEPROM.read(EEPROM_ADDR_MAGIC) != EEPROM_MAGIC) return; // use defaults
-
-  const uint8_t w = EEPROM.read(EEPROM_ADDR_WORK);
-  const uint8_t s = EEPROM.read(EEPROM_ADDR_SHORT);
-  const uint8_t l = EEPROM.read(EEPROM_ADDR_LONG);
-  const uint8_t b = EEPROM.read(EEPROM_ADDR_BUZZ);
-
-  // Validate ranges — corrupt data reverts to defaults for that field.
-  workMin    = (w >= MIN_DURATION && w <= MAX_WORK_MIN)  ? w : DEFAULT_WORK_MIN;
-  shortMin   = (s >= MIN_DURATION && s <= MAX_SHORT_MIN) ? s : DEFAULT_SHORT_MIN;
-  longMin    = (l >= MIN_DURATION && l <= MAX_LONG_MIN)  ? l : DEFAULT_LONG_MIN;
-  buzzerMode = (b < (uint8_t)BUZZ_MODE_COUNT) ? (BuzzerMode)b : DEFAULT_BUZZ_MODE;
-}
-
-// Persist workMin / shortMin / longMin / buzzerMode to EEPROM.
-// EEPROM.update() only writes a byte when its value has changed,
-// reducing wear on cells rated for ~100 000 write cycles.
-void saveSettings() {
-  EEPROM.update(EEPROM_ADDR_MAGIC, EEPROM_MAGIC);
-  EEPROM.update(EEPROM_ADDR_WORK,  (uint8_t)workMin);
-  EEPROM.update(EEPROM_ADDR_SHORT, (uint8_t)shortMin);
-  EEPROM.update(EEPROM_ADDR_LONG,  (uint8_t)longMin);
-  EEPROM.update(EEPROM_ADDR_BUZZ,  (uint8_t)buzzerMode);
-}
-
 // ---------------------------------------------------------------------------
 // Button enum (same ADC thresholds as all other sketches)
 // ---------------------------------------------------------------------------
@@ -175,6 +147,34 @@ unsigned long timerLastTickMs = 0;
 // Temporary values used only while inside the settings menu.
 int        editWork, editShort, editLong;
 BuzzerMode editBuzz;
+
+// Load workMin / shortMin / longMin / buzzerMode from EEPROM.
+// Falls back to compile-time defaults when the magic byte is absent or wrong.
+void loadSettings() {
+  if (EEPROM.read(EEPROM_ADDR_MAGIC) != EEPROM_MAGIC) return; // use defaults
+
+  const uint8_t w = EEPROM.read(EEPROM_ADDR_WORK);
+  const uint8_t s = EEPROM.read(EEPROM_ADDR_SHORT);
+  const uint8_t l = EEPROM.read(EEPROM_ADDR_LONG);
+  const uint8_t b = EEPROM.read(EEPROM_ADDR_BUZZ);
+
+  // Validate ranges — corrupt data reverts to defaults for that field.
+  workMin    = (w >= MIN_DURATION && w <= MAX_WORK_MIN)  ? w : DEFAULT_WORK_MIN;
+  shortMin   = (s >= MIN_DURATION && s <= MAX_SHORT_MIN) ? s : DEFAULT_SHORT_MIN;
+  longMin    = (l >= MIN_DURATION && l <= MAX_LONG_MIN)  ? l : DEFAULT_LONG_MIN;
+  buzzerMode = (b < (uint8_t)BUZZ_MODE_COUNT) ? (BuzzerMode)b : DEFAULT_BUZZ_MODE;
+}
+
+// Persist workMin / shortMin / longMin / buzzerMode to EEPROM.
+// EEPROM.update() only writes a byte when its value has changed,
+// reducing wear on cells rated for ~100 000 write cycles.
+void saveSettings() {
+  EEPROM.update(EEPROM_ADDR_MAGIC, EEPROM_MAGIC);
+  EEPROM.update(EEPROM_ADDR_WORK,  (uint8_t)workMin);
+  EEPROM.update(EEPROM_ADDR_SHORT, (uint8_t)shortMin);
+  EEPROM.update(EEPROM_ADDR_LONG,  (uint8_t)longMin);
+  EEPROM.update(EEPROM_ADDR_BUZZ,  (uint8_t)buzzerMode);
+}
 
 // ---------------------------------------------------------------------------
 // Button reading (identical mapping to Demo.ino / Menu.ino / AlarmClock.ino)
