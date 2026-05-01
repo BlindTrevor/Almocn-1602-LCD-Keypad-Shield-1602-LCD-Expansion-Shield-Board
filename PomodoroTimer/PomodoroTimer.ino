@@ -1,0 +1,483 @@
+// PomodoroTimer/PomodoroTimer.ino
+// Pomodoro productivity timer using the Almocn 1602 LCD Keypad Shield.
+// Tracks work sessions, short breaks, and long breaks with adjustable durations.
+//
+// Normal view (STATE_IDLE / STATE_RUNNING / STATE_PAUSED):
+//   Row 0:  WORK    25:00   (period label + MM:SS countdown)
+//   Row 1:  #:00 SEL=start  (pomodoro count + control hint)
+//
+// Alert view (STATE_ALERT) — period just ended:
+//   Row 0:  *  WORK DONE!  *   or   * BREAK DONE!  *
+//   Row 1:  SEL=next RT=rst
+//   Backlight flashes every 500 ms.
+//   Pin 3 (BUZZER_PIN) toggles every 500 ms.
+//   SELECT advances to the next period (work → break, break → work).
+//   RIGHT resets everything to the start.
+//
+// Settings menu (enter with LEFT from IDLE):
+//   RIGHT moves to the next page, LEFT moves back.
+//   UP / DOWN changes the value on the current page.
+//   SELECT saves all pages and returns to IDLE.
+//
+//   Page 1 — Work duration    (1 – 60 min, default 25)
+//   Page 2 — Short break      (1 – 30 min, default 5)
+//   Page 3 — Long break       (1 – 60 min, default 15)
+//
+// Button mapping (normal view):
+//   SELECT — start / pause / resume the countdown
+//   RIGHT  — reset to the beginning (clears the pomodoro count)
+//   LEFT   — enter the settings menu (only from IDLE)
+
+#include <LiquidCrystal.h>
+
+// ---------------------------------------------------------------------------
+// Hardware pins (same wiring as Demo.ino / Menu.ino / AlarmClock.ino)
+// ---------------------------------------------------------------------------
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
+
+const int KEY_PIN       = A0;
+const int BACKLIGHT_PIN = 10;
+const int BUZZER_PIN    = 3;   // passive piezo between D3 and GND
+
+// Set BACKLIGHT_ON_LEVEL to LOW if your shield uses an active-LOW backlight.
+const bool BACKLIGHT_ON_LEVEL  = HIGH;
+const bool BACKLIGHT_OFF_LEVEL = !BACKLIGHT_ON_LEVEL;
+
+// ---------------------------------------------------------------------------
+// Timing constants
+// ---------------------------------------------------------------------------
+const unsigned long DEBOUNCE_MS       = 40;   // button stability window (ms)
+const unsigned long LOOP_DELAY_MS     = 80;   // display refresh interval (ms)
+const unsigned long SPLASH_MS         = 1200; // startup splash duration (ms)
+const unsigned long FLASH_INTERVAL_MS = 500;  // backlight flash half-period (ms)
+const unsigned long BUZZ_INTERVAL_MS  = 500;  // buzzer toggle half-period (ms)
+
+// ---------------------------------------------------------------------------
+// Pomodoro defaults and limits
+// ---------------------------------------------------------------------------
+const int DEFAULT_WORK_MIN  = 25;
+const int DEFAULT_SHORT_MIN = 5;
+const int DEFAULT_LONG_MIN  = 15;
+const int MIN_DURATION      = 1;
+const int MAX_WORK_MIN      = 60;
+const int MAX_SHORT_MIN     = 30;
+const int MAX_LONG_MIN      = 60;
+const int POMODOROS_PER_LONG = 4;  // long break after every Nth completed work session
+
+// ---------------------------------------------------------------------------
+// Button enum (same ADC thresholds as all other sketches)
+// ---------------------------------------------------------------------------
+enum Button { BTN_RIGHT, BTN_UP, BTN_DOWN, BTN_LEFT, BTN_SELECT, BTN_NONE };
+
+// ---------------------------------------------------------------------------
+// Period type
+// ---------------------------------------------------------------------------
+enum PeriodType { PERIOD_WORK, PERIOD_SHORT_BREAK, PERIOD_LONG_BREAK };
+
+// ---------------------------------------------------------------------------
+// Application state machine
+// ---------------------------------------------------------------------------
+enum AppState {
+  STATE_IDLE,        // timer ready but not running
+  STATE_RUNNING,     // timer counting down
+  STATE_PAUSED,      // timer paused mid-period
+  STATE_ALERT,       // period just ended — flashing / beeping
+  STATE_MENU_WORK,   // settings: adjust work duration
+  STATE_MENU_SHORT,  // settings: adjust short-break duration
+  STATE_MENU_LONG    // settings: adjust long-break duration
+};
+
+// ---------------------------------------------------------------------------
+// Runtime variables
+// ---------------------------------------------------------------------------
+int        workMin       = DEFAULT_WORK_MIN;
+int        shortMin      = DEFAULT_SHORT_MIN;
+int        longMin       = DEFAULT_LONG_MIN;
+int        pomodoroCount = 0;
+PeriodType currentPeriod = PERIOD_WORK;
+AppState   appState      = STATE_IDLE;
+bool       backlightIsOn = true;
+long       secsRemaining = (long)DEFAULT_WORK_MIN * 60;
+
+// Tracks the last millis() tick so we can pause the countdown accurately.
+unsigned long timerLastTickMs = 0;
+
+// Temporary values used only while inside the settings menu.
+int editWork, editShort, editLong;
+
+// ---------------------------------------------------------------------------
+// Button reading (identical mapping to Demo.ino / Menu.ino / AlarmClock.ino)
+// ---------------------------------------------------------------------------
+Button readButton(int adc) {
+  if (adc < 50)  return BTN_RIGHT;
+  if (adc < 180) return BTN_UP;
+  if (adc < 330) return BTN_DOWN;
+  if (adc < 525) return BTN_LEFT;
+  if (adc < 800) return BTN_SELECT;
+  return BTN_NONE;
+}
+
+// Returns the button that was just pressed (rising-edge only, debounced).
+Button getPressEvent() {
+  static Button        lastStable   = BTN_NONE;
+  static unsigned long lastChangeMs = 0;
+
+  const unsigned long now     = millis();
+  Button              current = readButton(analogRead(KEY_PIN));
+
+  if (current != lastStable) {
+    if (now - lastChangeMs >= DEBOUNCE_MS) {
+      lastStable   = current;
+      lastChangeMs = now;
+      if (lastStable != BTN_NONE) return lastStable;
+    }
+  } else {
+    lastChangeMs = now;
+  }
+  return BTN_NONE;
+}
+
+// ---------------------------------------------------------------------------
+// Backlight (identical to Demo.ino / Menu.ino / AlarmClock.ino)
+// ---------------------------------------------------------------------------
+void setBacklight(bool on) {
+  digitalWrite(BACKLIGHT_PIN, on ? BACKLIGHT_ON_LEVEL : BACKLIGHT_OFF_LEVEL);
+  backlightIsOn = on;
+}
+
+// ---------------------------------------------------------------------------
+// Countdown tick — call every loop() iteration only while STATE_RUNNING
+// ---------------------------------------------------------------------------
+void tickTimer() {
+  const unsigned long now = millis();
+  if (now - timerLastTickMs >= 1000UL) {
+    timerLastTickMs = now;
+    if (secsRemaining > 0) secsRemaining--;
+  }
+}
+
+// Load secsRemaining for the current period.
+void loadPeriodTime() {
+  switch (currentPeriod) {
+    case PERIOD_WORK:        secsRemaining = (long)workMin  * 60; break;
+    case PERIOD_SHORT_BREAK: secsRemaining = (long)shortMin * 60; break;
+    case PERIOD_LONG_BREAK:  secsRemaining = (long)longMin  * 60; break;
+  }
+}
+
+// Advance to the next period (called when the user acknowledges an alert).
+// Increments the pomodoro count when a work session completes.
+void advancePeriod() {
+  if (currentPeriod == PERIOD_WORK) {
+    pomodoroCount++;
+    currentPeriod = (pomodoroCount % POMODOROS_PER_LONG == 0)
+                    ? PERIOD_LONG_BREAK
+                    : PERIOD_SHORT_BREAK;
+  } else {
+    currentPeriod = PERIOD_WORK;
+  }
+  loadPeriodTime();
+}
+
+// Full reset: clear the pomodoro count and return to the start of a work period.
+void resetTimer() {
+  pomodoroCount = 0;
+  currentPeriod = PERIOD_WORK;
+  loadPeriodTime();
+}
+
+// ---------------------------------------------------------------------------
+// Display helpers
+// ---------------------------------------------------------------------------
+
+// Print a zero-padded two-digit integer.
+void printTwoDigits(int val) {
+  if (val < 10) lcd.print('0');
+  lcd.print(val);
+}
+
+// 6-character period label (space-padded to keep row 0 stable).
+const char* periodLabel() {
+  switch (currentPeriod) {
+    case PERIOD_WORK:        return "WORK  ";
+    case PERIOD_SHORT_BREAK: return "BREAK ";
+    case PERIOD_LONG_BREAK:  return "L.BRK ";
+  }
+  return "      ";
+}
+
+// Normal timer view (IDLE / RUNNING / PAUSED).
+// Row 0: "WORK    25:00   "  (6 + 2 + 2 + 1 + 2 + 3 = 16 chars)
+// Row 1: "#:00 SEL=start  "  (2 + 2 + 1 + 11 = 16 chars)
+void drawTimer() {
+  const int mins = (int)(secsRemaining / 60);
+  const int secs = (int)(secsRemaining % 60);
+
+  lcd.setCursor(0, 0);
+  lcd.print(periodLabel());   // 6 chars
+  lcd.print("  ");            // 2 chars
+  printTwoDigits(mins);       // 2 chars
+  lcd.print(':');             // 1 char
+  printTwoDigits(secs);       // 2 chars
+  lcd.print("   ");           // 3 chars  — row 0 total: 16
+
+  lcd.setCursor(0, 1);
+  lcd.print("#:");                          // 2 chars
+  printTwoDigits(pomodoroCount % 100);      // 2 chars (wraps at 99 for display)
+  lcd.print(' ');                           // 1 char
+
+  switch (appState) {
+    case STATE_IDLE:    lcd.print("SEL=start  "); break; // 11 chars — row 1 total: 16
+    case STATE_RUNNING: lcd.print("SEL=pause  "); break; // 11 chars
+    case STATE_PAUSED:  lcd.print("SEL=resume "); break; // 11 chars
+    default:            lcd.print("           "); break; // 11 chars
+  }
+}
+
+// Alert view — period just ended.
+// Row 0: "*  WORK DONE!  *"  or  "* BREAK DONE!  *"  (16 chars each)
+// Row 1: "SEL=next RT=rst "  (16 chars)
+void drawAlert() {
+  lcd.setCursor(0, 0);
+  if (currentPeriod == PERIOD_WORK) {
+    lcd.print("*  WORK DONE!  *"); // 16 chars
+  } else {
+    lcd.print("* BREAK DONE!  *"); // 16 chars
+  }
+  lcd.setCursor(0, 1);
+  lcd.print("SEL=next RT=rst "); // 16 chars
+}
+
+// Generic settings menu header — caller must supply an exactly 16-character string.
+void drawMenuRow0(const char* label) {
+  lcd.setCursor(0, 0);
+  lcd.print(label);
+}
+
+// Settings menu value row.
+// Format: "< NN min UP/DN  "  (2 + 2 + 12 = 16 chars)
+void drawMenuRow1(int val) {
+  lcd.setCursor(0, 1);
+  lcd.print("< ");           // 2 chars
+  printTwoDigits(val);       // 2 chars
+  lcd.print(" min UP/DN  "); // 12 chars  — row 1 total: 16
+}
+
+// ---------------------------------------------------------------------------
+// setup
+// ---------------------------------------------------------------------------
+void setup() {
+  pinMode(BACKLIGHT_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+  setBacklight(true);
+
+  lcd.begin(16, 2);
+  lcd.clear();
+  lcd.print("Pomodoro Timer  "); // 16 chars
+  lcd.setCursor(0, 1);
+  lcd.print("SEL=go  LT=set  "); // 16 chars
+  delay(SPLASH_MS);
+  lcd.clear();
+}
+
+// ---------------------------------------------------------------------------
+// loop
+// ---------------------------------------------------------------------------
+void loop() {
+  const unsigned long now     = millis();
+  Button              pressed = getPressEvent();
+
+  // Advance the countdown only while the timer is running.
+  if (appState == STATE_RUNNING) {
+    tickTimer();
+    if (secsRemaining == 0) {
+      // Period just finished — enter alert.
+      appState = STATE_ALERT;
+      lcd.clear();
+    }
+  }
+
+  // ---- State machine -------------------------------------------------------
+  switch (appState) {
+
+    // ---- IDLE ---------------------------------------------------------------
+    case STATE_IDLE:
+      drawTimer();
+      switch (pressed) {
+        case BTN_SELECT:
+          timerLastTickMs = millis(); // first tick 1 s from now, not immediately
+          appState = STATE_RUNNING;
+          break;
+        case BTN_RIGHT:
+          resetTimer();
+          lcd.clear();
+          break;
+        case BTN_LEFT:
+          editWork  = workMin;
+          editShort = shortMin;
+          editLong  = longMin;
+          appState  = STATE_MENU_WORK;
+          lcd.clear();
+          break;
+        default: break;
+      }
+      break;
+
+    // ---- RUNNING ------------------------------------------------------------
+    case STATE_RUNNING:
+      drawTimer();
+      switch (pressed) {
+        case BTN_SELECT:
+          appState = STATE_PAUSED;
+          break;
+        case BTN_RIGHT:
+          resetTimer();
+          appState = STATE_IDLE;
+          lcd.clear();
+          break;
+        default: break;
+      }
+      break;
+
+    // ---- PAUSED -------------------------------------------------------------
+    case STATE_PAUSED:
+      drawTimer();
+      switch (pressed) {
+        case BTN_SELECT:
+          timerLastTickMs = millis(); // first tick 1 s from resume, not immediately
+          appState = STATE_RUNNING;
+          break;
+        case BTN_RIGHT:
+          resetTimer();
+          appState = STATE_IDLE;
+          lcd.clear();
+          break;
+        default: break;
+      }
+      break;
+
+    // ---- ALERT --------------------------------------------------------------
+    case STATE_ALERT: {
+      // Flash backlight
+      static unsigned long lastFlashMs = 0;
+      if (now - lastFlashMs >= FLASH_INTERVAL_MS) {
+        lastFlashMs = now;
+        setBacklight(!backlightIsOn);
+      }
+
+      // Toggle buzzer (pin 3)
+      static unsigned long lastBuzzMs = 0;
+      static bool          buzzerOn   = false;
+      if (now - lastBuzzMs >= BUZZ_INTERVAL_MS) {
+        lastBuzzMs = now;
+        buzzerOn   = !buzzerOn;
+        digitalWrite(BUZZER_PIN, buzzerOn ? HIGH : LOW);
+      }
+
+      drawAlert();
+
+      if (pressed == BTN_SELECT) {
+        // Advance to the next period and return to IDLE.
+        digitalWrite(BUZZER_PIN, LOW);
+        buzzerOn = false;
+        setBacklight(true);
+        advancePeriod();
+        appState = STATE_IDLE;
+        lcd.clear();
+      } else if (pressed == BTN_RIGHT) {
+        // Full reset — clear count and return to a fresh work session.
+        digitalWrite(BUZZER_PIN, LOW);
+        buzzerOn = false;
+        setBacklight(true);
+        resetTimer();
+        appState = STATE_IDLE;
+        lcd.clear();
+      }
+      break;
+    }
+
+    // ---- MENU: Work duration ------------------------------------------------
+    case STATE_MENU_WORK:
+      switch (pressed) {
+        case BTN_UP:   if (editWork < MAX_WORK_MIN) editWork++;  break;
+        case BTN_DOWN: if (editWork > MIN_DURATION) editWork--;  break;
+        case BTN_RIGHT:
+          appState = STATE_MENU_SHORT;
+          lcd.clear();
+          break;
+        case BTN_LEFT:
+          // Cancel — exit menu without saving.
+          appState = STATE_IDLE;
+          lcd.clear();
+          break;
+        case BTN_SELECT:
+          // Save all pages and return to IDLE.
+          workMin  = editWork;
+          shortMin = editShort;
+          longMin  = editLong;
+          resetTimer();
+          appState = STATE_IDLE;
+          lcd.clear();
+          break;
+        default: break;
+      }
+      drawMenuRow0("Work Duration:  "); // 16 chars
+      drawMenuRow1(editWork);
+      break;
+
+    // ---- MENU: Short break duration -----------------------------------------
+    case STATE_MENU_SHORT:
+      switch (pressed) {
+        case BTN_UP:   if (editShort < MAX_SHORT_MIN) editShort++; break;
+        case BTN_DOWN: if (editShort > MIN_DURATION)  editShort--; break;
+        case BTN_RIGHT:
+          appState = STATE_MENU_LONG;
+          lcd.clear();
+          break;
+        case BTN_LEFT:
+          appState = STATE_MENU_WORK;
+          lcd.clear();
+          break;
+        case BTN_SELECT:
+          workMin  = editWork;
+          shortMin = editShort;
+          longMin  = editLong;
+          resetTimer();
+          appState = STATE_IDLE;
+          lcd.clear();
+          break;
+        default: break;
+      }
+      drawMenuRow0("Short Break:    "); // 16 chars
+      drawMenuRow1(editShort);
+      break;
+
+    // ---- MENU: Long break duration ------------------------------------------
+    case STATE_MENU_LONG:
+      switch (pressed) {
+        case BTN_UP:   if (editLong < MAX_LONG_MIN) editLong++; break;
+        case BTN_DOWN: if (editLong > MIN_DURATION) editLong--; break;
+        case BTN_LEFT:
+          appState = STATE_MENU_SHORT;
+          lcd.clear();
+          break;
+        case BTN_RIGHT:
+        case BTN_SELECT:
+          // RIGHT on the last page saves and exits, same as SELECT.
+          workMin  = editWork;
+          shortMin = editShort;
+          longMin  = editLong;
+          resetTimer();
+          appState = STATE_IDLE;
+          lcd.clear();
+          break;
+        default: break;
+      }
+      drawMenuRow0("Long Break:     "); // 16 chars
+      drawMenuRow1(editLong);
+      break;
+  }
+
+  delay(LOOP_DELAY_MS);
+}
