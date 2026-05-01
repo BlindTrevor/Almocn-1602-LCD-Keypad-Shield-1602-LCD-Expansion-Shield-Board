@@ -300,7 +300,7 @@ Long Break:
 |-----|--------|
 | **RIGHT** | Advance to the next settings page |
 | **LEFT** | Go back to the previous page (or exit the menu from the first page without saving) |
-| **UP / DOWN** | Increase / decrease the displayed duration |
+| **UP / DOWN** | Increase / decrease the displayed duration; **hold** to repeat at an accelerating rate (slow for the first 2 s, then fast) |
 | **SELECT** | Save all pages and return to the timer |
 
 > **Hardware note:** Connect a passive piezo buzzer (or a transistor-driven active buzzer) between **D3** and **GND** for end-of-period audio feedback. The sketch works without a buzzer — only the backlight flash fires if no buzzer is wired.
@@ -478,7 +478,7 @@ PomodoroTimer/
 | Function | Purpose |
 |----------|---------|
 | `readButton(int adc)` | Same ADC-to-enum mapping as all other sketches |
-| `getPressEvent()` | Rising-edge button detector — fires once per physical press |
+| `getButtonEvent()` | Button event detector — fires once per press for all buttons; fires repeatedly at an accelerating rate while UP / DOWN are held |
 | `setBacklight(bool on)` | Controls backlight via `BACKLIGHT_PIN` |
 | `tickTimer()` | Decrements `secsRemaining` by 1 once per second using `millis()` |
 | `loadSettings()` | Reads work/short/long durations from EEPROM; falls back to compile-time defaults on first boot or if the magic byte is wrong |
@@ -528,8 +528,12 @@ const int DEFAULT_SHORT_MIN  = 5;   // default short break length (minutes)
 const int DEFAULT_LONG_MIN   = 15;  // default long break length (minutes)
 const int POMODOROS_PER_LONG = 4;   // work sessions before a long break
 const int BUZZER_PIN         = 3;   // buzzer between D3 and GND
-const unsigned long FLASH_INTERVAL_MS = 500; // backlight flash half-period
-const unsigned long BUZZ_INTERVAL_MS  = 500; // buzzer toggle half-period
+const unsigned long FLASH_INTERVAL_MS  = 500;  // backlight flash half-period
+const unsigned long BUZZ_INTERVAL_MS   = 500;  // buzzer toggle half-period
+const unsigned long HOLD_DELAY_MS      = 500;  // pause before UP/DOWN repeat begins
+const unsigned long HOLD_REPEAT_MS     = 200;  // slow repeat interval
+const unsigned long HOLD_FAST_MS       = 80;   // fast repeat interval
+const unsigned long HOLD_FAST_AFTER_MS = 2000; // switch to fast rate after this many ms
 ```
 
 ### EEPROM persistence

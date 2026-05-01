@@ -17,6 +17,7 @@
 // Settings menu (enter with LEFT from IDLE):
 //   RIGHT moves to the next page, LEFT moves back.
 //   UP / DOWN changes the value on the current page.
+//   Hold UP / DOWN to change the value faster (accelerates after 2 s).
 //   SELECT saves all pages and returns to IDLE.
 //
 //   Page 1 — Work duration    (1 – 60 min, default 25)
@@ -50,8 +51,14 @@ const bool BACKLIGHT_OFF_LEVEL = !BACKLIGHT_ON_LEVEL;
 const unsigned long DEBOUNCE_MS       = 40;   // button stability window (ms)
 const unsigned long LOOP_DELAY_MS     = 80;   // display refresh interval (ms)
 const unsigned long SPLASH_MS         = 1200; // startup splash duration (ms)
-const unsigned long FLASH_INTERVAL_MS = 500;  // backlight flash half-period (ms)
-const unsigned long BUZZ_INTERVAL_MS  = 500;  // buzzer toggle half-period (ms)
+const unsigned long FLASH_INTERVAL_MS  = 500;  // backlight flash half-period (ms)
+const unsigned long BUZZ_INTERVAL_MS   = 500;  // buzzer toggle half-period (ms)
+
+// Hold-to-repeat for UP / DOWN in the settings menu.
+const unsigned long HOLD_DELAY_MS      = 500;  // pause before repeat begins (ms)
+const unsigned long HOLD_REPEAT_MS     = 200;  // slow repeat interval (ms)
+const unsigned long HOLD_FAST_MS       = 80;   // fast repeat interval (ms)
+const unsigned long HOLD_FAST_AFTER_MS = 2000; // ms of holding before switching to fast rate
 
 // ---------------------------------------------------------------------------
 // Pomodoro defaults and limits
@@ -154,10 +161,17 @@ Button readButton(int adc) {
   return BTN_NONE;
 }
 
-// Returns the button that was just pressed (rising-edge only, debounced).
-Button getPressEvent() {
+// Returns the button event for this loop iteration.
+// For UP / DOWN: fires on first press and then repeats at an accelerating rate while held.
+//   Rate schedule: HOLD_DELAY_MS initial pause → HOLD_REPEAT_MS slow phase
+//                  → HOLD_FAST_MS fast phase (after HOLD_FAST_AFTER_MS total hold time).
+// For all other buttons: fires once per press (rising-edge only, debounced).
+Button getButtonEvent() {
   static Button        lastStable   = BTN_NONE;
   static unsigned long lastChangeMs = 0;
+  static unsigned long heldSinceMs  = 0;
+  static unsigned long lastRepeatMs = 0;
+  static bool          holdActive   = false;
 
   const unsigned long now     = millis();
   Button              current = readButton(analogRead(KEY_PIN));
@@ -166,10 +180,29 @@ Button getPressEvent() {
     if (now - lastChangeMs >= DEBOUNCE_MS) {
       lastStable   = current;
       lastChangeMs = now;
-      if (lastStable != BTN_NONE) return lastStable;
+      holdActive   = false;
+      if (lastStable != BTN_NONE) {
+        if (lastStable == BTN_UP || lastStable == BTN_DOWN) {
+          heldSinceMs  = now;
+          lastRepeatMs = now;
+          holdActive   = true;
+        }
+        return lastStable; // fire immediately on first press
+      }
     }
   } else {
     lastChangeMs = now;
+    if (holdActive) {
+      const unsigned long heldMs   = now - heldSinceMs;
+      if (heldMs >= HOLD_DELAY_MS) {
+        const unsigned long interval = (heldMs >= HOLD_FAST_AFTER_MS)
+                                       ? HOLD_FAST_MS : HOLD_REPEAT_MS;
+        if (now - lastRepeatMs >= interval) {
+          lastRepeatMs = now;
+          return lastStable; // repeated fire while held
+        }
+      }
+    }
   }
   return BTN_NONE;
 }
@@ -325,7 +358,7 @@ void setup() {
 // ---------------------------------------------------------------------------
 void loop() {
   const unsigned long now     = millis();
-  Button              pressed = getPressEvent();
+  Button              pressed = getButtonEvent();
 
   // Advance the countdown only while the timer is running.
   if (appState == STATE_RUNNING) {
