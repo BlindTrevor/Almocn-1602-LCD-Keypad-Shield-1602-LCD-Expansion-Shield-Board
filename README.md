@@ -109,11 +109,12 @@ Or download the ZIP from GitHub and extract it.
 
 ### 4. Open a sketch
 
-| Sketch     | File                        | Description |
-|------------|-----------------------------|-------------|
-| Demo       | `Demo/Demo.ino`             | Basic button display and fixed 5 s backlight timeout |
-| Menu       | `Menu/Menu.ino`             | Runtime menu to set timeout and toggle auto-off |
-| AlarmClock | `AlarmClock/AlarmClock.ino` | Bedside alarm clock with manual time setting, alarm, snooze, and buzzer |
+| Sketch        | File                                  | Description |
+|---------------|---------------------------------------|-------------|
+| Demo          | `Demo/Demo.ino`                       | Basic button display and fixed 5 s backlight timeout |
+| Menu          | `Menu/Menu.ino`                       | Runtime menu to set timeout and toggle auto-off |
+| AlarmClock    | `AlarmClock/AlarmClock.ino`           | Bedside alarm clock with manual time setting, alarm, snooze, and buzzer |
+| PomodoroTimer | `PomodoroTimer/PomodoroTimer.ino`     | Pomodoro productivity timer with adjustable work/break durations, pomodoro count, and end-of-period alert |
 
 Open whichever sketch you'd like to try in the Arduino IDE.
 
@@ -230,6 +231,92 @@ The backlight flashes and pin **D3** toggles HIGH/LOW to drive a buzzer (connect
 | **RIGHT** | Snooze — silences the alarm and re-triggers after 5 minutes |
 
 > **Hardware note:** The UNO has no real-time clock. Time is tracked with `millis()`, so the clock resets to 00:00:00 each time the board is powered on. Set the correct time after every power cycle using the settings menu.
+
+### Pomodoro Timer sketch
+
+After uploading `PomodoroTimer/PomodoroTimer.ino`, the LCD shows a splash screen then the normal timer view:
+
+```
+WORK    25:00
+#:00 SEL=start
+```
+
+The first row shows the current period label (`WORK`, `BREAK`, or `L.BRK`) and the remaining time as `MM:SS`. The second row shows the number of completed pomodoros (`#:NN`) and a hint for the primary button action.
+
+| Key | Action |
+|-----|--------|
+| **SELECT** (IDLE) | Start the countdown |
+| **SELECT** (RUNNING) | Pause the countdown |
+| **SELECT** (PAUSED) | Resume the countdown |
+| **RIGHT** | Reset — stops the timer and clears the pomodoro count |
+| **LEFT** (IDLE only) | Enter the settings menu |
+
+**Period sequence:**
+
+1. Work session counts down.
+2. When it reaches zero the display flashes and the buzzer beeps.
+3. Press **SELECT** to acknowledge and start the next break automatically (`BREAK` after sessions 1–3, `L.BRK` after every 4th session).
+4. When the break ends, press **SELECT** again to return to a fresh work session.
+
+**Alert view** (end of any period):
+
+```
+*  WORK DONE!  *
+SEL=next RT=rst
+```
+
+or, at the end of a break:
+
+```
+* BREAK DONE!  *
+SEL=next RT=rst
+```
+
+The backlight flashes every 500 ms; the buzzer behaviour depends on the **Buzzer Mode** setting (see Settings menu below).
+
+| Key | Action |
+|-----|--------|
+| **SELECT** | Advance to the next period |
+| **RIGHT** | Full reset — clear the pomodoro count and restart from scratch |
+
+**Settings menu** (press **LEFT** from the idle timer view):
+
+```
+Work Duration:
+< 25 min UP/DN
+```
+
+```
+Short Break:
+< 05 min UP/DN
+```
+
+```
+Long Break:
+< 15 min UP/DN
+```
+
+```
+Buzzer Mode:
+< SYNC   UP/DN
+```
+
+The **Buzzer Mode** page cycles through three options with UP / DOWN:
+
+| Display | Behaviour |
+|---------|-----------|
+| `OFF`  | Buzzer silent — only the backlight flashes |
+| `SYNC` | Buzzer toggles every 500 ms in time with the backlight flash (default) |
+| `BEEP` | Two short beeps every 2 s, watch-alarm style |
+
+| Key | Action |
+|-----|--------|
+| **RIGHT** | Advance to the next settings page |
+| **LEFT** | Go back to the previous page (or exit the menu from the first page without saving) |
+| **UP / DOWN** | Increase / decrease the displayed duration; **hold** to repeat at an accelerating rate (slow for the first 2 s, then fast) |
+| **SELECT** | Save all pages and return to the timer |
+
+> **Hardware note:** Connect a passive piezo buzzer (or a transistor-driven active buzzer) between **D3** and **GND** for end-of-period audio feedback. The sketch works without a buzzer — only the backlight flash fires if no buzzer is wired.
 
 ### Adapting the sketch to your project
 
@@ -390,6 +477,103 @@ Connect a passive piezo buzzer (or a transistor-driven active buzzer) between **
 
 ---
 
+## Pomodoro Timer Sketch Walkthrough
+
+```
+PomodoroTimer/
+└── PomodoroTimer.ino   — standalone Arduino sketch
+```
+
+`PomodoroTimer.ino` implements the [Pomodoro Technique](https://en.wikipedia.org/wiki/Pomodoro_Technique): focused work sessions separated by short breaks, with a longer break after every fourth completed session. All durations are adjustable at runtime through the built-in settings menu.
+
+### Key functions
+
+| Function | Purpose |
+|----------|---------|
+| `readButton(int adc)` | Same ADC-to-enum mapping as all other sketches |
+| `getButtonEvent()` | Button event detector — fires once per press for all buttons; fires repeatedly at an accelerating rate while UP / DOWN are held |
+| `setBacklight(bool on)` | Controls backlight via `BACKLIGHT_PIN` |
+| `tickTimer()` | Decrements `secsRemaining` by 1 once per second using `millis()` |
+| `loadSettings()` | Reads work/short/long durations and buzzer mode from EEPROM; falls back to compile-time defaults on first boot or if the magic byte is wrong |
+| `saveSettings()` | Writes the four settings to EEPROM using `EEPROM.update()` (write-only-if-changed) |
+| `loadPeriodTime()` | Sets `secsRemaining` to the configured duration for `currentPeriod` |
+| `advancePeriod()` | Increments the pomodoro count (on work completion) and switches to the next period |
+| `resetTimer()` | Clears the pomodoro count and restarts from a fresh work session |
+| `printTwoDigits(int val)` | Prints a zero-padded two-digit integer to the LCD |
+| `periodLabel()` | Returns the 6-character padded label for the current period |
+| `drawTimer()` | Renders the normal timer view (IDLE / RUNNING / PAUSED) |
+| `drawAlert()` | Renders the end-of-period alert view |
+| `drawMenuRow0(label)` | Prints a 16-character header row for settings pages |
+| `drawMenuRow1(val)` | Prints the value row (`< NN min UP/DN  `) for duration settings pages |
+| `drawMenuRowBuzz(mode)` | Prints the value row (`< SYNC   UP/DN  ` etc.) for the buzzer-mode page |
+| `setup()` | Initialises pins, LCD, and shows a splash screen |
+| `loop()` | Ticks the countdown, checks for period completion, and runs the state machine |
+
+### Application state machine
+
+| State | Description |
+|-------|-------------|
+| `STATE_IDLE` | Timer ready — shows countdown at period start; SELECT starts it |
+| `STATE_RUNNING` | Countdown active — SELECT pauses, RIGHT resets |
+| `STATE_PAUSED` | Countdown frozen — SELECT resumes, RIGHT resets |
+| `STATE_ALERT` | Period ended — backlight flashes, buzzer fires per mode; SELECT advances, RIGHT resets |
+| `STATE_MENU_WORK` | Settings page 1 — adjust work duration (1–60 min) |
+| `STATE_MENU_SHORT` | Settings page 2 — adjust short-break duration (1–30 min) |
+| `STATE_MENU_LONG` | Settings page 3 — adjust long-break duration (1–60 min) |
+| `STATE_MENU_BUZZ` | Settings page 4 — choose buzzer mode (OFF / SYNC / BEEP) |
+
+### Period sequence
+
+```
+WORK → SHORT_BREAK → WORK → SHORT_BREAK → WORK → SHORT_BREAK → WORK → LONG_BREAK → (repeat)
+  1          1          2          2          3          3          4         4
+```
+
+`POMODOROS_PER_LONG` (default `4`) controls how many completed work sessions trigger a long break.
+
+### Pause accuracy
+
+`timerLastTickMs` is reset to `millis()` every time the timer starts or resumes. This ensures the first tick after a resume fires exactly one second later rather than immediately, keeping the countdown accurate across any number of pause/resume cycles.
+
+### Key constants
+
+```cpp
+const int DEFAULT_WORK_MIN   = 25;  // default work session length (minutes)
+const int DEFAULT_SHORT_MIN  = 5;   // default short break length (minutes)
+const int DEFAULT_LONG_MIN   = 15;  // default long break length (minutes)
+const int POMODOROS_PER_LONG = 4;   // work sessions before a long break
+const int BUZZER_PIN         = 3;   // buzzer between D3 and GND
+const unsigned long FLASH_INTERVAL_MS  = 500;  // backlight flash half-period
+const unsigned long BUZZ_INTERVAL_MS   = 500;  // SYNC mode: buzzer toggle half-period
+const unsigned long BEEP_ON_MS    = 120;  // BEEP mode: duration of each beep
+const unsigned long BEEP_GAP_MS   = 120;  // BEEP mode: gap between the two beeps
+const unsigned long BEEP_CYCLE_MS = 2000; // BEEP mode: full repetition period
+const unsigned long HOLD_DELAY_MS      = 500;  // pause before UP/DOWN repeat begins
+const unsigned long HOLD_REPEAT_MS     = 200;  // slow repeat interval
+const unsigned long HOLD_FAST_MS       = 80;   // fast repeat interval
+const unsigned long HOLD_FAST_AFTER_MS = 2000; // switch to fast rate after this many ms
+```
+
+### EEPROM persistence
+
+The four adjustable settings (work, short break, long break, buzzer mode) are saved to internal EEPROM whenever the settings menu is confirmed. They are restored automatically on every power-on, so your custom settings survive resets and power cycles.
+
+| EEPROM address | Content |
+|----------------|---------|
+| 0 | Magic byte (`0xA7`) — marks the EEPROM as written by this sketch |
+| 1 | Work duration (minutes) |
+| 2 | Short-break duration (minutes) |
+| 3 | Long-break duration (minutes) |
+| 4 | Buzzer mode (`0`=OFF, `1`=SYNC, `2`=BEEP) |
+
+`saveSettings()` uses `EEPROM.update()`, which only writes a byte when its stored value has changed. This minimises wear on EEPROM cells (rated for approximately 100 000 write cycles).
+
+On first boot (or after flashing to a different board), the magic byte at address 0 will not match `EEPROM_MAGIC`, so the sketch silently falls back to the compile-time defaults. Each stored value is also range-checked individually: if a byte is outside the allowed range for that setting, only that field reverts to its default.
+
+> **Factory reset:** To force the sketch to revert to defaults, change `EEPROM_MAGIC` to any different value (e.g. `0xA8`) and re-upload. The mismatched magic byte will cause `loadSettings()` to ignore the stored values on the next boot.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -401,6 +585,7 @@ Connect a passive piezo buzzer (or a transistor-driven active buzzer) between **
 | Upload fails | Wrong board/port selected | Re-check **Tools → Board** and **Tools → Port** |
 | `LiquidCrystal.h` not found | Library not installed | Install via **Sketch → Include Library → Manage Libraries…** |
 | Buzzer silent when alarm fires | No buzzer wired to D3 | Connect a passive piezo between D3 and GND |
+| Buzzer silent at end of Pomodoro period | No buzzer wired to D3 | Connect a passive piezo between D3 and GND |
 | Clock drifts noticeably | `millis()` accuracy limitation (no RTC) | Re-set the time after long periods; consider adding a DS3231 RTC module for precision |
 
 ---
