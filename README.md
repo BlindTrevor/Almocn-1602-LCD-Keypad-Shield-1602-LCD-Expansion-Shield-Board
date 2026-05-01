@@ -481,6 +481,8 @@ PomodoroTimer/
 | `getPressEvent()` | Rising-edge button detector — fires once per physical press |
 | `setBacklight(bool on)` | Controls backlight via `BACKLIGHT_PIN` |
 | `tickTimer()` | Decrements `secsRemaining` by 1 once per second using `millis()` |
+| `loadSettings()` | Reads work/short/long durations from EEPROM; falls back to compile-time defaults on first boot or if the magic byte is wrong |
+| `saveSettings()` | Writes the three durations to EEPROM using `EEPROM.update()` (write-only-if-changed) |
 | `loadPeriodTime()` | Sets `secsRemaining` to the configured duration for `currentPeriod` |
 | `advancePeriod()` | Increments the pomodoro count (on work completion) and switches to the next period |
 | `resetTimer()` | Clears the pomodoro count and restarts from a fresh work session |
@@ -529,6 +531,23 @@ const int BUZZER_PIN         = 3;   // buzzer between D3 and GND
 const unsigned long FLASH_INTERVAL_MS = 500; // backlight flash half-period
 const unsigned long BUZZ_INTERVAL_MS  = 500; // buzzer toggle half-period
 ```
+
+### EEPROM persistence
+
+The three adjustable durations (work, short break, long break) are saved to internal EEPROM whenever the settings menu is confirmed. They are restored automatically on every power-on, so your custom timings survive resets and power cycles.
+
+| EEPROM address | Content |
+|----------------|---------|
+| 0 | Magic byte (`0xA7`) — marks the EEPROM as written by this sketch |
+| 1 | Work duration (minutes) |
+| 2 | Short-break duration (minutes) |
+| 3 | Long-break duration (minutes) |
+
+`saveSettings()` uses `EEPROM.update()`, which only writes a byte when its stored value has changed. This minimises wear on EEPROM cells (rated for approximately 100 000 write cycles).
+
+On first boot (or after flashing to a different board), the magic byte at address 0 will not match `EEPROM_MAGIC`, so the sketch silently falls back to the compile-time defaults. Each stored value is also range-checked individually: if a byte is outside the allowed range for that setting, only that field reverts to its default.
+
+> **Factory reset:** To force the sketch to revert to defaults, change `EEPROM_MAGIC` to any different value (e.g. `0xA8`) and re-upload. The mismatched magic byte will cause `loadSettings()` to ignore the stored values on the next boot.
 
 ---
 

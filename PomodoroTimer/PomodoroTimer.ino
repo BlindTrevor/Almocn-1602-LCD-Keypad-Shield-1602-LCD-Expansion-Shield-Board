@@ -28,6 +28,7 @@
 //   RIGHT  — reset to the beginning (clears the pomodoro count)
 //   LEFT   — enter the settings menu (only from IDLE)
 
+#include <EEPROM.h>
 #include <LiquidCrystal.h>
 
 // ---------------------------------------------------------------------------
@@ -63,6 +64,42 @@ const int MAX_WORK_MIN      = 60;
 const int MAX_SHORT_MIN     = 30;
 const int MAX_LONG_MIN      = 60;
 const int POMODOROS_PER_LONG = 4;  // long break after every Nth completed work session
+
+// ---------------------------------------------------------------------------
+// EEPROM layout
+// A single magic byte at address 0 guards against reading uninitialised EEPROM.
+// Addresses 1-3 store the three adjustable durations as single bytes (minutes).
+// ---------------------------------------------------------------------------
+const uint8_t EEPROM_MAGIC       = 0xA7; // change this value to force a reset to defaults
+const int     EEPROM_ADDR_MAGIC  = 0;
+const int     EEPROM_ADDR_WORK   = 1;
+const int     EEPROM_ADDR_SHORT  = 2;
+const int     EEPROM_ADDR_LONG   = 3;
+
+// Load workMin / shortMin / longMin from EEPROM.
+// Falls back to compile-time defaults when the magic byte is absent or wrong.
+void loadSettings() {
+  if (EEPROM.read(EEPROM_ADDR_MAGIC) != EEPROM_MAGIC) return; // use defaults
+
+  const uint8_t w = EEPROM.read(EEPROM_ADDR_WORK);
+  const uint8_t s = EEPROM.read(EEPROM_ADDR_SHORT);
+  const uint8_t l = EEPROM.read(EEPROM_ADDR_LONG);
+
+  // Validate ranges — corrupt data reverts to defaults for that field.
+  workMin  = (w >= MIN_DURATION && w <= MAX_WORK_MIN)  ? w : DEFAULT_WORK_MIN;
+  shortMin = (s >= MIN_DURATION && s <= MAX_SHORT_MIN) ? s : DEFAULT_SHORT_MIN;
+  longMin  = (l >= MIN_DURATION && l <= MAX_LONG_MIN)  ? l : DEFAULT_LONG_MIN;
+}
+
+// Persist workMin / shortMin / longMin to EEPROM.
+// EEPROM.update() only writes a byte when its value has changed,
+// reducing wear on cells rated for ~100 000 write cycles.
+void saveSettings() {
+  EEPROM.update(EEPROM_ADDR_MAGIC, EEPROM_MAGIC);
+  EEPROM.update(EEPROM_ADDR_WORK,  (uint8_t)workMin);
+  EEPROM.update(EEPROM_ADDR_SHORT, (uint8_t)shortMin);
+  EEPROM.update(EEPROM_ADDR_LONG,  (uint8_t)longMin);
+}
 
 // ---------------------------------------------------------------------------
 // Button enum (same ADC thresholds as all other sketches)
@@ -273,6 +310,8 @@ void setup() {
   setBacklight(true);
 
   lcd.begin(16, 2);
+  loadSettings();   // restore durations from EEPROM (falls back to defaults on first boot)
+  loadPeriodTime(); // apply the loaded work duration to secsRemaining
   lcd.clear();
   lcd.print("Pomodoro Timer  "); // 16 chars
   lcd.setCursor(0, 1);
@@ -416,6 +455,7 @@ void loop() {
           workMin  = editWork;
           shortMin = editShort;
           longMin  = editLong;
+          saveSettings();
           resetTimer();
           appState = STATE_IDLE;
           lcd.clear();
@@ -443,6 +483,7 @@ void loop() {
           workMin  = editWork;
           shortMin = editShort;
           longMin  = editLong;
+          saveSettings();
           resetTimer();
           appState = STATE_IDLE;
           lcd.clear();
@@ -468,6 +509,7 @@ void loop() {
           workMin  = editWork;
           shortMin = editShort;
           longMin  = editLong;
+          saveSettings();
           resetTimer();
           appState = STATE_IDLE;
           lcd.clear();
