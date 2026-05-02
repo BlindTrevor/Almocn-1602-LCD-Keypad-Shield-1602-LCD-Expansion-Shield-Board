@@ -17,9 +17,10 @@ An Arduino library demo and reference project for the **Almocn 1602 LCD Keypad S
 9. [Pomodoro Timer Sketch Walkthrough](#pomodoro-timer-sketch-walkthrough)
 10. [Kitchen Timer Sketch Walkthrough](#kitchen-timer-sketch-walkthrough)
 11. [DMX Monitor Sketch Walkthrough](#dmx-monitor-sketch-walkthrough)
-12. [Troubleshooting](#troubleshooting)
-13. [Contributing](#contributing)
-14. [License](#license)
+12. [Component Identifier Sketch Walkthrough](#component-identifier-sketch-walkthrough)
+13. [Troubleshooting](#troubleshooting)
+14. [Contributing](#contributing)
+15. [License](#license)
 
 ---
 
@@ -35,6 +36,7 @@ An Arduino library demo and reference project for the **Almocn 1602 LCD Keypad S
 - **Pomodoro timer** (`PomodoroTimer/PomodoroTimer.ino`) — focused work/break sessions with adjustable durations, pomodoro count, and end-of-period buzzer alert
 - **Kitchen timer** (`KitchenTimer/KitchenTimer.ino`) — simple countdown timer: set minutes and seconds, start/pause/reset with keypad buttons, buzzer alert on D3 when time is up
 - **DMX monitor** (`DmxMonitor/DmxMonitor.ino`) — receive and display live DMX512 channel values via a MAX485 RS-485 module; navigate all 512 channels with the keypad and view a real-time bar graph
+- **Component identifier** (`ComponentIdentifier/ComponentIdentifier.ino`) — guides the user through connecting an unknown electronic component and automatically identifies resistors, capacitors, silicon/germanium diodes, and LEDs; displays the component type and measured value (resistance, capacitance, or forward voltage) on the LCD
 - Compatible with **Arduino Uno, Nano, Mega**, and other 5 V AVR boards
 
 ---
@@ -48,6 +50,8 @@ An Arduino library demo and reference project for the **Almocn 1602 LCD Keypad S
 | USB cable | For programming and power |
 | MAX485 module *(DMX Monitor only)* | RS-485 transceiver module; required only for `DmxMonitor/DmxMonitor.ino` |
 | DMX source and XLR cable *(DMX Monitor only)* | Any DMX512 controller or dimmer pack, standard 3- or 5-pin XLR cable |
+| 10 kΩ resistor *(Component Identifier only)* | 1/4 W, 1 % tolerance recommended; forms the measurement reference divider |
+| Two short probe wires *(Component Identifier only)* | Standard jumper wires; connect to A1 and A2 on the shield header |
 
 The shield plugs directly onto the Arduino header — no extra wiring is required.
 
@@ -145,6 +149,7 @@ Or download the ZIP from GitHub and extract it.
 | PomodoroTimer | `PomodoroTimer/PomodoroTimer.ino`     | Pomodoro productivity timer with adjustable work/break durations, pomodoro count, and end-of-period alert |
 | KitchenTimer  | `KitchenTimer/KitchenTimer.ino`       | Countdown kitchen timer: set MM:SS with keypad, start/pause/reset, buzzer alert on D3 |
 | DmxMonitor    | `DmxMonitor/DmxMonitor.ino`           | DMX512 monitor: receive live channel values via MAX485, display value + bar graph, navigate all 512 channels |
+| ComponentIdentifier | `ComponentIdentifier/ComponentIdentifier.ino` | Component identifier: auto-detect resistors, capacitors, diodes, and LEDs; display type and measured value |
 
 Open whichever sketch you'd like to try in the Arduino IDE.
 
@@ -430,6 +435,42 @@ The monitor re-acquires the signal automatically as soon as a valid DMX frame ar
 | **UP** | Jump forward 10 channels |
 | **DOWN** | Jump backward 10 channels |
 | **SELECT** | Return to channel 1 |
+
+### Component Identifier sketch
+
+After uploading `ComponentIdentifier/ComponentIdentifier.ino` and wiring the reference resistor (see [Component Identifier Sketch Walkthrough](#component-identifier-sketch-walkthrough) for the wiring diagram), the LCD shows a welcome screen:
+
+```
+Component Tester
+  SEL = start
+```
+
+Press **SELECT** to reach the connection prompt:
+
+```
+Connect A1 & A2
+  SEL = measure
+```
+
+Connect the unknown component between the **A1** and **A2** header pins, then press **SELECT** to trigger the measurement. The LCD shows progress messages and then the result:
+
+| Component | Row 0 | Row 1 (example) |
+|-----------|-------|-----------------|
+| Resistor  | `RESISTOR        ` | `4.70 kohm      ` |
+| Capacitor | `CAPACITOR       ` | ` 47.0 uF       ` |
+| Silicon diode | `DIODE  Silicon  ` | `Vf=0.65V  A1=+  ` |
+| Germanium diode | `DIODE  Germanium` | `Vf=0.30V  A1=+  ` |
+| LED | `LED             ` | `Vf=2.10V  A1=+  ` |
+| Short / wire | `SHORT / WIRE    ` | `< 1 ohm        ` |
+| No component | `Open / No comp. ` | `Check connection` |
+
+`A1=+` on a diode or LED result means A1 is connected to the **anode** (positive terminal).
+
+| Key | Action |
+|-----|--------|
+| **SELECT** (welcome) | Enter the connection prompt |
+| **SELECT** (result) | Test another component |
+| **RIGHT** (result) | Return to the welcome screen |
 
 ### Adapting the sketch to your project
 
@@ -842,6 +883,123 @@ const unsigned long    LOOP_DELAY_MS     = 80;     // LCD refresh interval
 
 ---
 
+## Component Identifier Sketch Walkthrough
+
+```
+ComponentIdentifier/
+└── ComponentIdentifier.ino   — standalone Arduino sketch
+```
+
+`ComponentIdentifier.ino` turns the shield into a handheld component tester. The user connects an unknown electronic component between two probe wires, presses SELECT, and the LCD displays the identified component type along with its measured value.
+
+### Required external hardware
+
+| Item | Notes |
+|------|-------|
+| 10 kΩ resistor (1/4 W, 1 %) | Forms the reference voltage divider |
+| Two short probe wires | Standard jumper wires work well |
+
+### Wiring
+
+```
+Arduino D12 ──[10 kΩ]──── A1  ←─ PROBE_PLUS  (one lead of component)
+Arduino A2  ─────────────────  ←─ PROBE_MINUS (other lead of component)
+```
+
+Step-by-step:
+
+1. Solder or clip the 10 kΩ resistor between **D12** and **A1** on the shield header.
+2. Attach a short wire (yellow or red) to **A1** — this is **PROBE_PLUS**.
+3. Attach a short wire (black) to **A2** — this is **PROBE_MINUS**.
+4. Connect the unknown component between the two probe wires.
+
+> **Diode/LED polarity:** Connect the **anode (+)** to A1 (PROBE_PLUS) and the **cathode (−)** to A2 (PROBE_MINUS). If the screen shows "Open / No comp." after pressing SELECT, swap the leads and try again.
+
+### Application state machine
+
+| State | Description |
+|-------|-------------|
+| `STATE_IDLE` | Welcome screen — SELECT enters the connection prompt |
+| `STATE_PROMPT` | "Connect A1 & A2" — SELECT triggers measurement |
+| `STATE_RESULT` | Displays the component type and measured value; SELECT → prompt, RIGHT → idle |
+
+### Measurement techniques
+
+| Component | Technique | Notes |
+|-----------|-----------|-------|
+| **Resistor** | Voltage divider: `R = 10 kΩ × V_A1 / (5 V − V_A1)` | Accurate range ~100 Ω – 1 MΩ |
+| **Capacitor** | RC charge-time: `C = τ / 10 kΩ`, where τ is the time for A1 to rise to 63.2 % of 5 V | Measurable range ~1 µF – 200 µF |
+| **Silicon diode** | Stable Vf in 0.50 – 0.75 V | — |
+| **Germanium diode** | Stable Vf in 0.15 – 0.45 V | — |
+| **LED** | Stable Vf in 1.60 – 3.50 V | — |
+| **Short / wire** | A1 < 0.05 V with D12 HIGH | — |
+| **Open circuit** | A1 > 4.95 V with D12 HIGH | — |
+
+The sketch distinguishes capacitors from resistors by taking two ADC readings 500 ms apart: if the voltage is still changing (delta > 12 ADC counts), the component is a capacitor. The capacitor is then discharged through the 10 kΩ reference and re-charged to measure the RC time constant.
+
+### Key functions
+
+| Function | Purpose |
+|----------|---------|
+| `readButton(int adc)` | Same ADC-to-enum mapping as all other sketches |
+| `getPressEvent()` | Rising-edge button detector — fires once per physical press |
+| `setBacklight(bool on)` | Controls backlight via `BACKLIGHT_PIN` |
+| `enableMeasurement()` | Drives D12 HIGH and A2 LOW to energise the test circuit |
+| `disableMeasurement()` | Sets D12 and A2 to high-impedance (safe idle state) |
+| `averageADC(int samples)` | Returns the average of N readings from A1 to reduce noise |
+| `dischargeCapacitor()` | Drives D12 LOW and waits for A1 to fall below 0.05 V (up to 15 s) |
+| `measureCapacitance()` | Re-charges the capacitor and times the rise to 63.2 % of Vcc |
+| `classifyByVoltage(int adc)` | Maps a stable ADC reading to a component type |
+| `calcResistance(int adc)` | Voltage-divider formula → resistance in ohms |
+| `runMeasurement()` | Orchestrates the full detection sequence; updates LCD with progress |
+| `printResistance(float ohms)` | Formats and prints resistance with auto-scaling unit (ohm / kohm / Mohm) |
+| `printCapacitance(float uf)` | Formats and prints capacitance in µF or mF |
+| `printForwardVoltage(float vf)` | Formats and prints diode/LED forward voltage with polarity note |
+| `drawIdle()` | Renders the welcome screen |
+| `drawPrompt()` | Renders the "Connect A1 & A2" screen |
+| `drawResult()` | Renders the identification result |
+| `setup()` | Initialises pins, LCD, and shows a splash screen |
+| `loop()` | Handles button events and runs the state machine |
+
+### Key constants
+
+```cpp
+const int   REF_PIN          = 12;       // D12: drives HIGH through reference resistor
+const int   PROBE_A_PIN      = A1;       // measurement node (PROBE_PLUS)
+const int   PROBE_B_PIN      = A2;       // driven LOW (PROBE_MINUS)
+const float R_REF_OHMS       = 10000.0f; // 10 kΩ reference resistor value
+const float VCC              = 5.0f;     // nominal supply voltage
+
+// ADC classification thresholds (0–1023 maps to 0–5 V)
+const int ADC_SHORT_MAX      = 10;   // < 0.05 V  → short
+const int ADC_GE_LOW         = 31;   // ≥ 0.15 V  → Ge diode lower bound
+const int ADC_GE_HIGH        = 92;   // ≤ 0.45 V  → Ge diode upper bound
+const int ADC_SI_LOW         = 102;  // ≥ 0.50 V  → Si diode lower bound
+const int ADC_SI_HIGH        = 153;  // ≤ 0.75 V  → Si diode upper bound
+const int ADC_LED_LOW        = 328;  // ≥ 1.60 V  → LED lower bound
+const int ADC_LED_HIGH       = 716;  // ≤ 3.50 V  → LED upper bound
+const int ADC_OPEN_MIN       = 1013; // > 4.95 V  → open circuit
+
+const int ADC_STABILITY_DELTA          = 12;     // max acceptable reading change → resistor
+const unsigned long CAP_CHARGE_TIMEOUT_MS   = 10000UL; // max charge-time window (ms)
+const unsigned long CAP_DISCHARGE_TIMEOUT_MS = 15000UL; // max discharge-time window (ms)
+```
+
+### Measurement limits and notes
+
+| Parameter | Limit | Notes |
+|-----------|-------|-------|
+| Minimum measurable resistance | ~100 Ω | Below this the divider ratio leaves too little voltage headroom for accuracy |
+| Maximum measurable resistance | ~1 MΩ | Above this the divider ratio compresses near 5 V; readings become inaccurate |
+| Minimum measurable capacitance | ~1 µF | Smaller caps charge in < 10 ms; `millis()` resolution is insufficient |
+| Maximum measurable capacitance | ~200 µF | Larger caps take > 10 s to discharge through 10 kΩ; shown as `>200 uF` |
+| Diode / LED polarity | A1 = anode | If the screen shows "Open", swap the probe leads |
+| Capacitor polarity | A2 = negative | For electrolytic caps connect the negative lead to A2 |
+| Pre-charged capacitors | — | Discharge the cap before testing; a pre-charged cap may read as "Open" |
+| Measurement time | Up to ~25 s | Normal resistors/diodes: < 1 s; caps near 200 µF: up to 25 s total |
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -860,6 +1018,11 @@ const unsigned long    LOOP_DELAY_MS     = 80;     // LCD refresh interval
 | DMX Monitor upload fails or hangs | MAX485 RO still connected to D0 | Disconnect the RO wire from D0 before uploading; reconnect afterwards |
 | DMX values stuck at 0 or wrong | Incorrect baud rate (non-16 MHz board) | Recalculate `UBRR0L` using `F_CPU / (16 × 250000) − 1` for your clock speed |
 | DMX values flickering / garbled | Missing 120 Ω termination resistor | Add a 120 Ω resistor across MAX485 A and B terminals |
+| Component Identifier reads "Open / No comp." | Component not connected or diode reversed | Check probe connections; for diodes/LEDs swap the leads so the anode is at A1 |
+| Component Identifier shows wrong resistance | 10 kΩ reference resistor not connected, or wrong value | Verify the 10 kΩ resistor is wired between D12 and A1 |
+| Component Identifier shows "Unknown" | Component value outside detection ranges | Resistors < 100 Ω or > 1 MΩ, or unusual components, may not be classifiable |
+| Capacitor reads ">200 uF" | Capacitance too large to time with 10 kΩ | Only caps up to ~200 µF are measurable; larger caps need a lower reference value |
+| Capacitor reads "Open" | Cap was pre-charged from a previous circuit | Discharge the capacitor fully before testing |
 
 ---
 
