@@ -444,7 +444,7 @@ void setup() {
   lcd.clear();
   lcd.print("Component Tester");
   lcd.setCursor(0, 1);
-  lcd.print("Initialising... ");
+  lcd.print("Initializing... ");
   delay(SPLASH_MS);
   lcd.clear();
 }
