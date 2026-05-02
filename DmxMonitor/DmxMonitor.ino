@@ -5,8 +5,8 @@
 //   MAX485  │ Arduino    │ Notes
 //   ────────┼────────────┼──────────────────────────────────────────────────
 //   RO      │ D0 (RX)   │ Receiver Output → hardware UART RX
-//   RE      │ D2        │ Receiver Enable (active LOW)  — held LOW = RX
-//   DE      │ D11       │ Driver Enable   (active HIGH) — held LOW = RX
+//   RE      │ D1 (TX)   │ Receiver Enable (active LOW)  — held LOW = RX
+//   DE      │ D2        │ Driver Enable   (active HIGH) — held LOW = RX
 //   DI      │ —         │ Driver Input, not connected (receive only)
 //   A       │ DMX +     │ Non-inverting RS-485 line (XLR 3-pin: pin 3)
 //   B       │ DMX −     │ Inverting   RS-485 line (XLR 3-pin: pin 2)
@@ -51,8 +51,8 @@ LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
 
 const int KEY_PIN       = A0;
 const int BACKLIGHT_PIN = 10;
-const int RE_PIN        = 2;   // MAX485 RE (Receiver Enable, active LOW)
-const int DE_PIN        = 11;  // MAX485 DE (Driver Enable, active HIGH)
+const int RE_PIN        = 1;   // MAX485 RE (Receiver Enable, active LOW)  — D1/TX
+const int DE_PIN        = 2;   // MAX485 DE (Driver Enable, active HIGH)
 
 // Set BACKLIGHT_ON_LEVEL to LOW if your shield uses an active-LOW backlight.
 const bool BACKLIGHT_ON_LEVEL  = HIGH;
