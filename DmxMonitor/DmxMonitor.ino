@@ -5,8 +5,8 @@
 //   MAX485  │ Arduino    │ Notes
 //   ────────┼────────────┼──────────────────────────────────────────────────
 //   RO      │ D0 (RX)   │ Receiver Output → hardware UART RX
-//   RE  ┐   │ D2        │ Receiver Enable (active LOW)  ─┐ tie together,
-//   DE  ┘   │ D2        │ Driver Enable   (active HIGH) ─┘ held LOW = RX
+//   RE      │ D2        │ Receiver Enable (active LOW)  — held LOW = RX
+//   DE      │ D11       │ Driver Enable   (active HIGH) — held LOW = RX
 //   DI      │ —         │ Driver Input, not connected (receive only)
 //   A       │ DMX +     │ Non-inverting RS-485 line (XLR 3-pin: pin 3)
 //   B       │ DMX −     │ Inverting   RS-485 line (XLR 3-pin: pin 2)
@@ -46,7 +46,8 @@ LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
 
 const int KEY_PIN       = A0;
 const int BACKLIGHT_PIN = 10;
-const int DE_RE_PIN     = 2;   // MAX485 DE + RE pins tied together
+const int RE_PIN        = 2;   // MAX485 RE (Receiver Enable, active LOW)
+const int DE_PIN        = 11;  // MAX485 DE (Driver Enable, active HIGH)
 
 // Set BACKLIGHT_ON_LEVEL to LOW if your shield uses an active-LOW backlight.
 const bool BACKLIGHT_ON_LEVEL  = HIGH;
@@ -86,8 +87,10 @@ unsigned long dmxLastFrameMs  = 0;
 // 2 stop bits, no parity.  Arduino's Serial library is NOT used here,
 // so there is no conflict with its ISR — we install our own ISR below.
 void setupDMX() {
-  pinMode(DE_RE_PIN, OUTPUT);
-  digitalWrite(DE_RE_PIN, LOW);   // MAX485 → receive mode (RE = DE = LOW)
+  pinMode(RE_PIN, OUTPUT);
+  digitalWrite(RE_PIN, LOW);   // MAX485 RE LOW → receiver enabled
+  pinMode(DE_PIN, OUTPUT);
+  digitalWrite(DE_PIN, LOW);   // MAX485 DE LOW → driver disabled (receive-only)
 
   // Baud rate register: UBRR = F_CPU / (16 × baud) − 1
   // At 16 MHz: 16 000 000 / (16 × 250 000) − 1 = 3

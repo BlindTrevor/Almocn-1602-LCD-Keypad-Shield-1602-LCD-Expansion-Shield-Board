@@ -99,9 +99,9 @@ The following Arduino pins are **not used by the shield** and are free for your 
 |------|------------------------------------------------|
 | D0   | Available — **used by DMX Monitor (MAX485 RO); disconnect before uploading when wired** |
 | D1   | Available                                      |
-| D2   | Available — **used by DMX Monitor (MAX485 DE/RE control)** |
+| D2   | Available — **used by DMX Monitor (MAX485 RE control)** |
 | D3   | Available — **buzzer connected by default; use with caution** |
-| D11  | Available                                      |
+| D11  | Available — **used by DMX Monitor (MAX485 DE control)** |
 | D12  | Available                                      |
 | A1   | Available                                      |
 | A2   | Available                                      |
@@ -767,8 +767,8 @@ DmxMonitor/
 | MAX485 pin | Arduino pin | Notes |
 |------------|-------------|-------|
 | RO         | D0 (RX)     | Receiver Output → hardware UART RX |
-| RE         | D2          | Receiver Enable (active LOW) — tie to DE |
-| DE         | D2          | Driver Enable (active HIGH) — tie to RE; both held LOW = receive-only |
+| RE         | D2          | Receiver Enable (active LOW) — held LOW = receive-only |
+| DE         | D11         | Driver Enable (active HIGH) — held LOW = receive-only |
 | DI         | —           | Driver Input, not connected (receive only) |
 | A          | DMX+        | Non-inverting RS-485 line (XLR 3-pin: pin 3) |
 | B          | DMX−        | Inverting RS-485 line (XLR 3-pin: pin 2) |
