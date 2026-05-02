@@ -325,30 +325,17 @@ The **Buzzer Mode** page cycles through three options with UP / DOWN:
 
 ### Kitchen Timer sketch
 
-After uploading `KitchenTimer/KitchenTimer.ino`, the LCD shows a splash screen then the minutes setting page:
+After uploading `KitchenTimer/KitchenTimer.ino`, the LCD shows a splash screen then the set-time screen, where minutes and seconds are displayed together:
 
 ```
-Set Minutes:
-< 05 > UP/DN >
-```
-
-| Key | Action |
-|-----|--------|
-| **UP / DOWN** | Increase / decrease the displayed value; **hold** to repeat at an accelerating rate |
-| **RIGHT** | Advance to the seconds setting page |
-| **SELECT** | Start the countdown immediately |
-
-On the seconds setting page:
-
-```
-Set Seconds:
-< 00 > UP/DN >
+Set Timer  05:00
+U/D=min LR=sec
 ```
 
 | Key | Action |
 |-----|--------|
-| **UP / DOWN** | Increase / decrease the seconds value |
-| **LEFT** | Go back to the minutes page |
+| **UP / DOWN** | Increase / decrease the **minutes** (0–99); **hold** to repeat at an accelerating rate |
+| **RIGHT / LEFT** | Increase / decrease the **seconds** (0–59); **hold** to repeat at an accelerating rate |
 | **SELECT** | Start the countdown immediately |
 
 Once started, the display shows the live countdown:
@@ -661,16 +648,15 @@ KitchenTimer/
 | Function | Purpose |
 |----------|---------|
 | `readButton(int adc)` | Same ADC-to-enum mapping as all other sketches |
-| `getButtonEvent()` | Button event detector — fires once per press for all buttons; fires repeatedly at an accelerating rate while UP / DOWN are held |
+| `getButtonEvent()` | Button event detector — fires once per press for SELECT; fires repeatedly at an accelerating rate while UP / DOWN / LEFT / RIGHT are held |
 | `setBacklight(bool on)` | Controls backlight via `BACKLIGHT_PIN` |
 | `tickTimer()` | Decrements `secsRemaining` by 1 once per second using `millis()` |
 | `printTwoDigits(int val)` | Prints a zero-padded two-digit integer to the LCD |
-| `drawSetMinutes()` | Renders the minutes setting page |
-| `drawSetSeconds()` | Renders the seconds setting page |
+| `drawSetTimer()` | Renders the set-time screen showing `MM:SS` with button hints |
 | `drawTimer(hint)` | Renders the live countdown view (RUNNING / PAUSED) |
 | `drawDone()` | Renders the alert view when the timer reaches zero |
 | `startTimer()` | Loads `secsRemaining` from `setMinutes`/`setSeconds` and transitions to `STATE_RUNNING` |
-| `resetToSet()` | Silences the buzzer, restores the backlight, and returns to `STATE_SET_MIN` |
+| `resetToSet()` | Silences the buzzer, restores the backlight, and returns to `STATE_SET` |
 | `setup()` | Initialises pins, LCD, and shows a splash screen |
 | `loop()` | Ticks the countdown, handles button events, and runs the state machine |
 
@@ -678,8 +664,7 @@ KitchenTimer/
 
 | State | Description |
 |-------|-------------|
-| `STATE_SET_MIN` | Minutes setting page — UP/DOWN adjust minutes (0–99), RIGHT goes to seconds, SELECT starts |
-| `STATE_SET_SEC` | Seconds setting page — UP/DOWN adjust seconds (0–59), LEFT goes back, SELECT starts |
+| `STATE_SET` | Set-time screen — UP/DOWN adjust minutes (0–99), LEFT/RIGHT adjust seconds (0–59), SELECT starts |
 | `STATE_RUNNING` | Countdown active — SELECT pauses, RIGHT resets |
 | `STATE_PAUSED` | Countdown frozen — SELECT resumes, RIGHT resets |
 | `STATE_DONE` | Timer reached zero — backlight flashes, buzzer fires; SELECT or RIGHT resets |
@@ -703,7 +688,7 @@ const int MAX_MINUTES            = 99;   // maximum settable minutes
 const int MAX_SECONDS            = 59;   // maximum settable seconds
 const unsigned long FLASH_INTERVAL_MS = 500;  // backlight flash half-period
 const unsigned long BUZZ_INTERVAL_MS  = 500;  // buzzer toggle half-period
-const unsigned long HOLD_DELAY_MS      = 500;  // pause before UP/DOWN repeat begins
+const unsigned long HOLD_DELAY_MS      = 500;  // pause before directional-button repeat begins
 const unsigned long HOLD_REPEAT_MS     = 200;  // slow repeat interval
 const unsigned long HOLD_FAST_MS       = 80;   // fast repeat interval
 const unsigned long HOLD_FAST_AFTER_MS = 2000; // switch to fast rate after this many ms

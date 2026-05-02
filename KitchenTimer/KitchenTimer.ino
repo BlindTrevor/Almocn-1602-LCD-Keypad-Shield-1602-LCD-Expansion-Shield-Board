@@ -1,13 +1,12 @@
 // KitchenTimer/KitchenTimer.ino
 // Kitchen timer using the Almocn 1602 LCD Keypad Shield.
 //
-// Set time view (STATE_SET_MIN / STATE_SET_SEC):
-//   Row 0:  Set Minutes:        (or  Set Seconds:    )
-//   Row 1:  < MM > UP/DN >      (or  < SS > UP/DN >  )
-//   UP / DOWN change the displayed value (hold to repeat, accelerates after 2 s).
-//   RIGHT advances from the minutes page to the seconds page.
-//   LEFT  goes back from the seconds page to the minutes page.
-//   SELECT on either page starts the countdown immediately.
+// Set time view (STATE_SET):
+//   Row 0:  Set Timer  MM:SS
+//   Row 1:  U/D=min LR=sec
+//   UP / DOWN change the minutes (hold to repeat, accelerates after 2 s).
+//   LEFT / RIGHT change the seconds (hold to repeat, accelerates after 2 s).
+//   SELECT starts the countdown immediately.
 //
 // Running view (STATE_RUNNING):
 //   Row 0:  Timer   MM:SS
@@ -48,7 +47,7 @@ const unsigned long SPLASH_MS         = 1200; // startup splash duration (ms)
 const unsigned long FLASH_INTERVAL_MS = 500;  // backlight flash half-period (ms)
 const unsigned long BUZZ_INTERVAL_MS  = 500;  // buzzer toggle half-period (ms)
 
-// Hold-to-repeat for UP / DOWN while setting the time.
+// Hold-to-repeat for all four directional buttons while setting the time.
 const unsigned long HOLD_DELAY_MS      = 500;  // pause before repeat begins (ms)
 const unsigned long HOLD_REPEAT_MS     = 200;  // slow repeat interval (ms)
 const unsigned long HOLD_FAST_MS       = 80;   // fast repeat interval (ms)
@@ -69,8 +68,7 @@ enum Button { BTN_RIGHT, BTN_UP, BTN_DOWN, BTN_LEFT, BTN_SELECT, BTN_NONE };
 // Application state machine
 // ---------------------------------------------------------------------------
 enum AppState {
-  STATE_SET_MIN,  // user is adjusting the minute component
-  STATE_SET_SEC,  // user is adjusting the second component
+  STATE_SET,      // user is setting minutes and seconds on one screen
   STATE_RUNNING,  // countdown is active
   STATE_PAUSED,   // countdown is paused mid-run
   STATE_DONE      // timer reached zero — buzzer is firing
@@ -83,7 +81,7 @@ int      setMinutes    = 5;    // last user-chosen minutes (persists between res
 int      setSeconds    = 0;    // last user-chosen seconds (persists between resets)
 long     secsRemaining = 0;    // remaining seconds while running or paused
 bool     backlightIsOn = true;
-AppState appState      = STATE_SET_MIN;
+AppState appState      = STATE_SET;
 
 unsigned long timerLastTickMs = 0; // millis() snapshot of the last countdown tick
 
@@ -100,11 +98,11 @@ Button readButton(int adc) {
 }
 
 // Returns the button event for this loop() iteration.
-// For UP / DOWN: fires on the first press then repeats at an accelerating rate
-//               while the button is held.
+// For UP / DOWN / LEFT / RIGHT: fires on the first press then repeats at an
+//               accelerating rate while the button is held.
 //   Rate schedule: HOLD_DELAY_MS initial pause → HOLD_REPEAT_MS slow phase
 //                  → HOLD_FAST_MS fast phase (after HOLD_FAST_AFTER_MS total hold time).
-// For all other buttons: fires once per press (rising-edge only, debounced).
+// For SELECT: fires once per press (rising-edge only, debounced).
 Button getButtonEvent() {
   static Button        lastStable   = BTN_NONE;
   static unsigned long lastChangeMs = 0;
@@ -121,7 +119,8 @@ Button getButtonEvent() {
       lastChangeMs = now;
       holdActive   = false;
       if (lastStable != BTN_NONE) {
-        if (lastStable == BTN_UP || lastStable == BTN_DOWN) {
+        if (lastStable == BTN_UP   || lastStable == BTN_DOWN ||
+            lastStable == BTN_LEFT || lastStable == BTN_RIGHT) {
           heldSinceMs  = now;
           lastRepeatMs = now;
           holdActive   = true;
@@ -175,28 +174,17 @@ void printTwoDigits(int val) {
   lcd.print(val);
 }
 
-// Setting view — minutes page.
-// Row 0:  Set Minutes:    (16 chars)
-// Row 1:  < MM > UP/DN >  (16 chars)
-void drawSetMinutes() {
+// Setting view — combined minutes and seconds on one screen.
+// Row 0:  Set Timer  MM:SS   (16 chars)
+// Row 1:  U/D=min LR=sec     (16 chars)
+void drawSetTimer() {
   lcd.setCursor(0, 0);
-  lcd.print("Set Minutes:    ");
-  lcd.setCursor(0, 1);
-  lcd.print("< ");
+  lcd.print("Set Timer  ");
   printTwoDigits(setMinutes);
-  lcd.print(" > UP/DN >  ");
-}
-
-// Setting view — seconds page.
-// Row 0:  Set Seconds:    (16 chars)
-// Row 1:  < SS > UP/DN >  (16 chars)
-void drawSetSeconds() {
-  lcd.setCursor(0, 0);
-  lcd.print("Set Seconds:    ");
-  lcd.setCursor(0, 1);
-  lcd.print("< ");
+  lcd.print(':');
   printTwoDigits(setSeconds);
-  lcd.print(" > UP/DN >  ");
+  lcd.setCursor(0, 1);
+  lcd.print("U/D=min LR=sec  ");
 }
 
 // Countdown display — shared between STATE_RUNNING and STATE_PAUSED.
@@ -244,7 +232,7 @@ void startTimer() {
 void resetToSet() {
   digitalWrite(BUZZER_PIN, LOW);
   setBacklight(true);
-  appState = STATE_SET_MIN;
+  appState = STATE_SET;
   lcd.clear();
 }
 
@@ -275,8 +263,8 @@ void loop() {
 
   switch (appState) {
 
-    // ---- Set minutes -------------------------------------------------------
-    case STATE_SET_MIN:
+    // ---- Set time (minutes and seconds on one screen) ----------------------
+    case STATE_SET:
       switch (pressed) {
         case BTN_UP:
           setMinutes = (setMinutes < MAX_MINUTES) ? setMinutes + 1 : 0;
@@ -285,36 +273,17 @@ void loop() {
           setMinutes = (setMinutes > 0) ? setMinutes - 1 : MAX_MINUTES;
           break;
         case BTN_RIGHT:
-          appState = STATE_SET_SEC;
-          lcd.clear();
-          break;
-        case BTN_SELECT:
-          startTimer();
-          break;
-        default: break;
-      }
-      if (appState == STATE_SET_MIN) drawSetMinutes();
-      break;
-
-    // ---- Set seconds -------------------------------------------------------
-    case STATE_SET_SEC:
-      switch (pressed) {
-        case BTN_UP:
           setSeconds = (setSeconds < MAX_SECONDS) ? setSeconds + 1 : 0;
           break;
-        case BTN_DOWN:
-          setSeconds = (setSeconds > 0) ? setSeconds - 1 : MAX_SECONDS;
-          break;
         case BTN_LEFT:
-          appState = STATE_SET_MIN;
-          lcd.clear();
+          setSeconds = (setSeconds > 0) ? setSeconds - 1 : MAX_SECONDS;
           break;
         case BTN_SELECT:
           startTimer();
           break;
         default: break;
       }
-      if (appState == STATE_SET_SEC) drawSetSeconds();
+      if (appState == STATE_SET) drawSetTimer();
       break;
 
     // ---- Running -----------------------------------------------------------
