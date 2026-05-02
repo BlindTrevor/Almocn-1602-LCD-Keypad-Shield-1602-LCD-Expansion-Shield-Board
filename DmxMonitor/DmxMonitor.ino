@@ -7,7 +7,7 @@
 //   RO      │ D0 (RX)   │ Receiver Output → hardware UART RX
 //   RE      │ D1 (TX)   │ Receiver Enable (active LOW)  — held LOW = RX
 //   DE      │ D2        │ Driver Enable   (active HIGH) — held LOW = RX
-//   DI      │ —         │ Driver Input, not connected (receive only)
+//   DI      │ D11       │ Driver Input — held LOW (receive only)
 //   A       │ DMX +     │ Non-inverting RS-485 line (XLR 3-pin: pin 3)
 //   B       │ DMX −     │ Inverting   RS-485 line (XLR 3-pin: pin 2)
 //   VCC     │ 5 V       │
@@ -53,6 +53,7 @@ const int KEY_PIN       = A0;
 const int BACKLIGHT_PIN = 10;
 const int RE_PIN        = 1;   // MAX485 RE (Receiver Enable, active LOW)  — D1/TX
 const int DE_PIN        = 2;   // MAX485 DE (Driver Enable, active HIGH)
+const int DI_PIN        = 11;  // MAX485 DI (Driver Input) — held LOW, receive only
 
 // Set BACKLIGHT_ON_LEVEL to LOW if your shield uses an active-LOW backlight.
 const bool BACKLIGHT_ON_LEVEL  = HIGH;
@@ -96,6 +97,8 @@ void setupDMX() {
   digitalWrite(RE_PIN, LOW);   // MAX485 RE LOW → receiver enabled
   pinMode(DE_PIN, OUTPUT);
   digitalWrite(DE_PIN, LOW);   // MAX485 DE LOW → driver disabled (receive-only)
+  pinMode(DI_PIN, OUTPUT);
+  digitalWrite(DI_PIN, LOW);   // MAX485 DI LOW → driver input grounded
 
   // Baud rate register: UBRR = F_CPU / (16 × baud) − 1
   // At 16 MHz: 16 000 000 / (16 × 250 000) − 1 = 3
