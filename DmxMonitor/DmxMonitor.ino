@@ -38,6 +38,7 @@
 //   SELECT         jump back to channel 1
 
 #include <LiquidCrystal.h>
+#include "ButtonType.h"
 
 // ---------------------------------------------------------------------------
 // Hardware pins
@@ -177,8 +178,6 @@ bool fetchDMXFrame() {
 // ---------------------------------------------------------------------------
 // Button reading (identical mapping to all other sketches)
 // ---------------------------------------------------------------------------
-enum Button { BTN_RIGHT, BTN_UP, BTN_DOWN, BTN_LEFT, BTN_SELECT, BTN_NONE };
-
 Button readButton(int adc) {
   if (adc < 50)   return BTN_RIGHT;
   if (adc < 180)  return BTN_UP;
