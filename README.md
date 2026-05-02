@@ -87,6 +87,26 @@ ADC thresholds used by the demo sketch:
 
 > **Note:** Some shields drive the backlight active-HIGH (write `HIGH` to turn on); others are active-LOW. The `BACKLIGHT_ON_LEVEL` constant in the sketch lets you flip this without changing any other code.
 
+### Available Pins for User Projects
+
+The following Arduino pins are **not used by the shield** and are free for your own circuitry:
+
+| Pin  | Notes                                          |
+|------|------------------------------------------------|
+| D0   | Available                                      |
+| D1   | Available                                      |
+| D2   | Available                                      |
+| D3   | Available — **buzzer connected by default; use with caution** |
+| D11  | Available                                      |
+| D12  | Available                                      |
+| A1   | Available                                      |
+| A2   | Available                                      |
+| A3   | Available                                      |
+| A4   | Available                                      |
+| A5   | Available                                      |
+
+> **⚠️ Warning:** Pin D3 has an onboard buzzer attached. Driving this pin with a conflicting signal or leaving it floating may produce unexpected noise. If you do not need the buzzer, you can desolder it or simply avoid using pin D3.
+
 ---
 
 ## Installation
