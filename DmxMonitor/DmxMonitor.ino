@@ -287,11 +287,13 @@ void setup() {
 // loop
 // ---------------------------------------------------------------------------
 void loop() {
-  const unsigned long now     = millis();
-  Button              pressed = getPressEvent();
+  Button pressed = getPressEvent();
 
   // Copy any newly completed DMX frame to the stable display buffer.
+  // fetchDMXFrame() updates dmxLastFrameMs via millis(); capture 'now'
+  // afterwards so the signal-timeout comparison can never underflow.
   fetchDMXFrame();
+  const unsigned long now = millis();
 
   // Determine whether a live DMX signal is present.
   bool signalPresent = dmxEverReceived && (now - dmxLastFrameMs < SIGNAL_TIMEOUT_MS);
