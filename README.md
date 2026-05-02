@@ -14,9 +14,11 @@ An Arduino library demo and reference project for the **Almocn 1602 LCD Keypad S
 6. [Demo Sketch Walkthrough](#demo-sketch-walkthrough)
 7. [Menu Sketch Walkthrough](#menu-sketch-walkthrough)
 8. [Alarm Clock Sketch Walkthrough](#alarm-clock-sketch-walkthrough)
-9. [Troubleshooting](#troubleshooting)
-10. [Contributing](#contributing)
-11. [License](#license)
+9. [Pomodoro Timer Sketch Walkthrough](#pomodoro-timer-sketch-walkthrough)
+10. [Kitchen Timer Sketch Walkthrough](#kitchen-timer-sketch-walkthrough)
+11. [Troubleshooting](#troubleshooting)
+12. [Contributing](#contributing)
+13. [License](#license)
 
 ---
 
@@ -29,6 +31,8 @@ An Arduino library demo and reference project for the **Almocn 1602 LCD Keypad S
 - **Debounced button reading** for reliable key detection
 - **Runtime backlight menu** (`Menu/Menu.ino`) — change the timeout duration and enable/disable auto-off on-device without recompiling
 - **Alarm clock** (`AlarmClock/AlarmClock.ino`) — manual time setting, configurable alarm with LCD flash and buzzer output on pin D3, snooze, and enable/disable toggle
+- **Pomodoro timer** (`PomodoroTimer/PomodoroTimer.ino`) — focused work/break sessions with adjustable durations, pomodoro count, and end-of-period buzzer alert
+- **Kitchen timer** (`KitchenTimer/KitchenTimer.ino`) — simple countdown timer: set minutes and seconds, start/pause/reset with keypad buttons, buzzer alert on D3 when time is up
 - Compatible with **Arduino Uno, Nano, Mega**, and other 5 V AVR boards
 
 ---
@@ -115,6 +119,7 @@ Or download the ZIP from GitHub and extract it.
 | Menu          | `Menu/Menu.ino`                       | Runtime menu to set timeout and toggle auto-off |
 | AlarmClock    | `AlarmClock/AlarmClock.ino`           | Bedside alarm clock with manual time setting, alarm, snooze, and buzzer |
 | PomodoroTimer | `PomodoroTimer/PomodoroTimer.ino`     | Pomodoro productivity timer with adjustable work/break durations, pomodoro count, and end-of-period alert |
+| KitchenTimer  | `KitchenTimer/KitchenTimer.ino`       | Countdown kitchen timer: set MM:SS with keypad, start/pause/reset, buzzer alert on D3 |
 
 Open whichever sketch you'd like to try in the Arduino IDE.
 
@@ -317,6 +322,74 @@ The **Buzzer Mode** page cycles through three options with UP / DOWN:
 | **SELECT** | Save all pages and return to the timer |
 
 > **Hardware note:** Connect a passive piezo buzzer (or a transistor-driven active buzzer) between **D3** and **GND** for end-of-period audio feedback. The sketch works without a buzzer — only the backlight flash fires if no buzzer is wired.
+
+### Kitchen Timer sketch
+
+After uploading `KitchenTimer/KitchenTimer.ino`, the LCD shows a splash screen then the minutes setting page:
+
+```
+Set Minutes:
+< 05 > UP/DN >
+```
+
+| Key | Action |
+|-----|--------|
+| **UP / DOWN** | Increase / decrease the displayed value; **hold** to repeat at an accelerating rate |
+| **RIGHT** | Advance to the seconds setting page |
+| **SELECT** | Start the countdown immediately |
+
+On the seconds setting page:
+
+```
+Set Seconds:
+< 00 > UP/DN >
+```
+
+| Key | Action |
+|-----|--------|
+| **UP / DOWN** | Increase / decrease the seconds value |
+| **LEFT** | Go back to the minutes page |
+| **SELECT** | Start the countdown immediately |
+
+Once started, the display shows the live countdown:
+
+```
+Timer   05:00
+SEL=pause RT=rst
+```
+
+| Key | Action |
+|-----|--------|
+| **SELECT** | Pause the countdown |
+| **RIGHT** | Reset — stops the timer and returns to the set-time screen |
+
+When paused:
+
+```
+Timer   04:47
+SEL=resm  RT=rst
+```
+
+| Key | Action |
+|-----|--------|
+| **SELECT** | Resume the countdown |
+| **RIGHT** | Reset — returns to the set-time screen |
+
+When the timer reaches zero the display switches to the alert view:
+
+```
+** TIME IS UP! *
+SEL=reset
+```
+
+The backlight flashes and pin **D3** toggles HIGH/LOW to drive the buzzer.
+
+| Key | Action |
+|-----|--------|
+| **SELECT** | Stop the buzzer and return to the set-time screen |
+| **RIGHT** | Stop the buzzer and return to the set-time screen |
+
+> **Hardware note:** Connect a passive piezo buzzer (or a transistor-driven active buzzer) between **D3** and **GND**. The sketch works without a buzzer — only the backlight flashes if no buzzer is wired.
 
 ### Adapting the sketch to your project
 
@@ -574,6 +647,74 @@ On first boot (or after flashing to a different board), the magic byte at addres
 
 ---
 
+## Kitchen Timer Sketch Walkthrough
+
+```
+KitchenTimer/
+└── KitchenTimer.ino   — standalone Arduino sketch
+```
+
+`KitchenTimer.ino` turns the shield into a simple kitchen countdown timer. The user sets a duration in minutes and seconds using the keypad, starts the countdown, and is alerted with a flashing backlight and buzzer when time is up.
+
+### Key functions
+
+| Function | Purpose |
+|----------|---------|
+| `readButton(int adc)` | Same ADC-to-enum mapping as all other sketches |
+| `getButtonEvent()` | Button event detector — fires once per press for all buttons; fires repeatedly at an accelerating rate while UP / DOWN are held |
+| `setBacklight(bool on)` | Controls backlight via `BACKLIGHT_PIN` |
+| `tickTimer()` | Decrements `secsRemaining` by 1 once per second using `millis()` |
+| `printTwoDigits(int val)` | Prints a zero-padded two-digit integer to the LCD |
+| `drawSetMinutes()` | Renders the minutes setting page |
+| `drawSetSeconds()` | Renders the seconds setting page |
+| `drawTimer(hint)` | Renders the live countdown view (RUNNING / PAUSED) |
+| `drawDone()` | Renders the alert view when the timer reaches zero |
+| `startTimer()` | Loads `secsRemaining` from `setMinutes`/`setSeconds` and transitions to `STATE_RUNNING` |
+| `resetToSet()` | Silences the buzzer, restores the backlight, and returns to `STATE_SET_MIN` |
+| `setup()` | Initialises pins, LCD, and shows a splash screen |
+| `loop()` | Ticks the countdown, handles button events, and runs the state machine |
+
+### Application state machine
+
+| State | Description |
+|-------|-------------|
+| `STATE_SET_MIN` | Minutes setting page — UP/DOWN adjust minutes (0–99), RIGHT goes to seconds, SELECT starts |
+| `STATE_SET_SEC` | Seconds setting page — UP/DOWN adjust seconds (0–59), LEFT goes back, SELECT starts |
+| `STATE_RUNNING` | Countdown active — SELECT pauses, RIGHT resets |
+| `STATE_PAUSED` | Countdown frozen — SELECT resumes, RIGHT resets |
+| `STATE_DONE` | Timer reached zero — backlight flashes, buzzer fires; SELECT or RIGHT resets |
+
+### Alert behaviour
+
+- When `secsRemaining` reaches `0` the sketch transitions to `STATE_DONE`.
+- The backlight flashes every `FLASH_INTERVAL_MS` (500 ms).
+- Pin **D3** toggles every `BUZZ_INTERVAL_MS` (500 ms).
+- Both the backlight and buzzer stop as soon as SELECT or RIGHT is pressed.
+
+### Pause accuracy
+
+`timerLastTickMs` is reset to `millis()` every time the timer starts or resumes. This ensures the first tick after a resume fires exactly one second later, keeping the displayed time accurate across any number of pause/resume cycles.
+
+### Key constants
+
+```cpp
+const int BUZZER_PIN             = 3;    // buzzer between D3 and GND
+const int MAX_MINUTES            = 99;   // maximum settable minutes
+const int MAX_SECONDS            = 59;   // maximum settable seconds
+const unsigned long FLASH_INTERVAL_MS = 500;  // backlight flash half-period
+const unsigned long BUZZ_INTERVAL_MS  = 500;  // buzzer toggle half-period
+const unsigned long HOLD_DELAY_MS      = 500;  // pause before UP/DOWN repeat begins
+const unsigned long HOLD_REPEAT_MS     = 200;  // slow repeat interval
+const unsigned long HOLD_FAST_MS       = 80;   // fast repeat interval
+const unsigned long HOLD_FAST_AFTER_MS = 2000; // switch to fast rate after this many ms
+```
+
+### Wiring the buzzer
+
+Connect a passive piezo buzzer (or a transistor-driven active buzzer) between **D3** and **GND**. No additional components are needed for a passive piezo; for louder output use an NPN transistor (e.g. 2N2222) with a 1 kΩ base resistor.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -586,6 +727,7 @@ On first boot (or after flashing to a different board), the magic byte at addres
 | `LiquidCrystal.h` not found | Library not installed | Install via **Sketch → Include Library → Manage Libraries…** |
 | Buzzer silent when alarm fires | No buzzer wired to D3 | Connect a passive piezo between D3 and GND |
 | Buzzer silent at end of Pomodoro period | No buzzer wired to D3 | Connect a passive piezo between D3 and GND |
+| Buzzer silent when kitchen timer expires | No buzzer wired to D3 | Connect a passive piezo between D3 and GND |
 | Clock drifts noticeably | `millis()` accuracy limitation (no RTC) | Re-set the time after long periods; consider adding a DS3231 RTC module for precision |
 
 ---
