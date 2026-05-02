@@ -16,9 +16,10 @@ An Arduino library demo and reference project for the **Almocn 1602 LCD Keypad S
 8. [Alarm Clock Sketch Walkthrough](#alarm-clock-sketch-walkthrough)
 9. [Pomodoro Timer Sketch Walkthrough](#pomodoro-timer-sketch-walkthrough)
 10. [Kitchen Timer Sketch Walkthrough](#kitchen-timer-sketch-walkthrough)
-11. [Troubleshooting](#troubleshooting)
-12. [Contributing](#contributing)
-13. [License](#license)
+11. [DMX Monitor Sketch Walkthrough](#dmx-monitor-sketch-walkthrough)
+12. [Troubleshooting](#troubleshooting)
+13. [Contributing](#contributing)
+14. [License](#license)
 
 ---
 
@@ -33,6 +34,7 @@ An Arduino library demo and reference project for the **Almocn 1602 LCD Keypad S
 - **Alarm clock** (`AlarmClock/AlarmClock.ino`) — manual time setting, configurable alarm with LCD flash and buzzer output on pin D3, snooze, and enable/disable toggle
 - **Pomodoro timer** (`PomodoroTimer/PomodoroTimer.ino`) — focused work/break sessions with adjustable durations, pomodoro count, and end-of-period buzzer alert
 - **Kitchen timer** (`KitchenTimer/KitchenTimer.ino`) — simple countdown timer: set minutes and seconds, start/pause/reset with keypad buttons, buzzer alert on D3 when time is up
+- **DMX monitor** (`DmxMonitor/DmxMonitor.ino`) — receive and display live DMX512 channel values via a MAX485 RS-485 module; navigate all 512 channels with the keypad and view a real-time bar graph
 - Compatible with **Arduino Uno, Nano, Mega**, and other 5 V AVR boards
 
 ---
@@ -44,6 +46,8 @@ An Arduino library demo and reference project for the **Almocn 1602 LCD Keypad S
 | Arduino Uno / Nano / Mega | Any 5 V AVR board with matching headers |
 | Almocn 1602 LCD Keypad Shield | Or any compatible 1602 shield sharing the same pinout |
 | USB cable | For programming and power |
+| MAX485 module *(DMX Monitor only)* | RS-485 transceiver module; required only for `DmxMonitor/DmxMonitor.ino` |
+| DMX source and XLR cable *(DMX Monitor only)* | Any DMX512 controller or dimmer pack, standard 3- or 5-pin XLR cable |
 
 The shield plugs directly onto the Arduino header — no extra wiring is required.
 
@@ -93,9 +97,9 @@ The following Arduino pins are **not used by the shield** and are free for your 
 
 | Pin  | Notes                                          |
 |------|------------------------------------------------|
-| D0   | Available                                      |
+| D0   | Available — **used by DMX Monitor (MAX485 RO); disconnect before uploading when wired** |
 | D1   | Available                                      |
-| D2   | Available                                      |
+| D2   | Available — **used by DMX Monitor (MAX485 DE/RE control)** |
 | D3   | Available — **buzzer connected by default; use with caution** |
 | D11  | Available                                      |
 | D12  | Available                                      |
@@ -140,6 +144,7 @@ Or download the ZIP from GitHub and extract it.
 | AlarmClock    | `AlarmClock/AlarmClock.ino`           | Bedside alarm clock with manual time setting, alarm, snooze, and buzzer |
 | PomodoroTimer | `PomodoroTimer/PomodoroTimer.ino`     | Pomodoro productivity timer with adjustable work/break durations, pomodoro count, and end-of-period alert |
 | KitchenTimer  | `KitchenTimer/KitchenTimer.ino`       | Countdown kitchen timer: set MM:SS with keypad, start/pause/reset, buzzer alert on D3 |
+| DmxMonitor    | `DmxMonitor/DmxMonitor.ino`           | DMX512 monitor: receive live channel values via MAX485, display value + bar graph, navigate all 512 channels |
 
 Open whichever sketch you'd like to try in the Arduino IDE.
 
@@ -397,6 +402,34 @@ The backlight flashes and pin **D3** toggles HIGH/LOW to drive the buzzer.
 | **RIGHT** | Stop the buzzer and return to the set-time screen |
 
 > **Hardware note:** Connect a passive piezo buzzer (or a transistor-driven active buzzer) between **D3** and **GND**. The sketch works without a buzzer — only the backlight flashes if no buzzer is wired.
+
+### DMX Monitor sketch
+
+After uploading `DmxMonitor/DmxMonitor.ino` and connecting the MAX485 module (see wiring below), the LCD shows a splash screen then switches to the live monitor view:
+
+```
+Ch:001   Val:255
+[##############]
+```
+
+The first row shows the currently selected DMX channel number and its raw value (0–255). The second row shows a 14-segment bar graph scaled from 0 to full.
+
+If no DMX signal is being received the display changes to:
+
+```
+Ch:001   Val:---
+ No DMX signal
+```
+
+The monitor re-acquires the signal automatically as soon as a valid DMX frame arrives.
+
+| Key | Action |
+|-----|--------|
+| **RIGHT** | Next channel (+1, wraps 512 → 1) |
+| **LEFT** | Previous channel (−1, wraps 1 → 512) |
+| **UP** | Jump forward 10 channels |
+| **DOWN** | Jump backward 10 channels |
+| **SELECT** | Return to channel 1 |
 
 ### Adapting the sketch to your project
 
@@ -720,6 +753,95 @@ Connect a passive piezo buzzer (or a transistor-driven active buzzer) between **
 
 ---
 
+## DMX Monitor Sketch Walkthrough
+
+```
+DmxMonitor/
+└── DmxMonitor.ino   — standalone Arduino sketch
+```
+
+`DmxMonitor.ino` turns the shield into a live DMX512 signal monitor. It receives the RS-485 differential signal through a MAX485 module connected to the Arduino hardware UART, then displays each channel's value and a proportional bar graph on the LCD. All 512 channels are accessible with the keypad.
+
+### MAX485 wiring
+
+| MAX485 pin | Arduino pin | Notes |
+|------------|-------------|-------|
+| RO         | D0 (RX)     | Receiver Output → hardware UART RX |
+| RE         | D2          | Receiver Enable (active LOW) — tie to DE |
+| DE         | D2          | Driver Enable (active HIGH) — tie to RE; both held LOW = receive-only |
+| DI         | —           | Driver Input, not connected (receive only) |
+| A          | DMX+        | Non-inverting RS-485 line (XLR 3-pin: pin 3) |
+| B          | DMX−        | Inverting RS-485 line (XLR 3-pin: pin 2) |
+| VCC        | 5 V         | |
+| GND        | GND         | |
+
+> **Termination:** Fit a 120 Ω resistor across the A and B terminals on the last device on the DMX run.
+>
+> **XLR pinout (3-pin):** pin 1 = GND/shield, pin 2 = DMX− (B), pin 3 = DMX+ (A).
+>
+> **Upload warning:** D0 is shared with the USB–serial upload link. Disconnect the MAX485 RO wire from D0 **before** clicking Upload in the Arduino IDE, then reconnect it once upload completes.
+
+### Arduino Mega note
+
+On a Mega, connect MAX485 RO to **D19** (Serial1 RX) so the USB serial port remains free. In `setupDMX()` replace `UBRR0H`, `UBRR0L`, `UCSR0A`, `UCSR0B`, `UCSR0C` with `UBRR1H`, `UBRR1L`, `UCSR1A`, `UCSR1B`, `UCSR1C`, and change the ISR name from `USART_RX_vect` to `USART1_RX_vect`.
+
+### How DMX512 reception works
+
+DMX512 is a unidirectional RS-485 serial protocol running at **250 000 baud** (8 data bits, 2 stop bits, no parity). Each universe packet begins with a **BREAK** — the transmitter holds the line LOW for at least 88 µs, long enough for the UART to report a **framing error** (FE0 bit in UCSR0A). The sketch detects this framing error as the start-of-packet signal, reads the **start code** byte (0x00 for standard DMX), then collects up to 512 channel bytes.
+
+The UART is configured directly via the AVR hardware registers (not through Arduino's `Serial` library) so the framing error flag can be read reliably before each byte is consumed.
+
+### Key functions
+
+| Function | Purpose |
+|----------|---------|
+| `setupDMX()` | Configures UART0 for 250 000 baud, 8N2, receiver-only; drives DE/RE LOW |
+| `ISR(USART_RX_vect)` | Fires on every received byte; checks FE0 for BREAK, then runs the DMX state machine |
+| `fetchDMXFrame()` | Atomically copies the ISR buffer to the stable display buffer when a new frame is ready |
+| `readButton(int adc)` | Same ADC-to-enum mapping as all other sketches |
+| `getPressEvent()` | Rising-edge button detector — fires once per physical press |
+| `setBacklight(bool on)` | Controls backlight via `BACKLIGHT_PIN` |
+| `printThreeDigits(int val)` | Prints a zero-padded three-digit integer to the LCD |
+| `drawMonitor(bool signalPresent)` | Renders row 0 (channel number + value) and row 1 (bar graph or no-signal message) |
+| `setup()` | Initialises pins, LCD, shows splash screen, and starts the DMX receiver |
+| `loop()` | Calls `fetchDMXFrame()`, handles button navigation, and refreshes the display |
+
+### Application state machine
+
+The DMX receiver uses an internal three-state machine, driven entirely inside the ISR:
+
+| State | Description |
+|-------|-------------|
+| `DMX_IDLE` | Waiting for the next BREAK; incoming bytes are discarded |
+| `DMX_BREAK` | BREAK received — next byte is the start code |
+| `DMX_DATA` | Collecting channel bytes into `dmxBuf[]` until 512 bytes arrive or a new BREAK occurs |
+
+The main loop runs independently: it calls `fetchDMXFrame()` each iteration to atomically snapshot the ISR buffer, checks `dmxLastFrameMs` to decide whether the signal is live, and redraws the LCD every `LOOP_DELAY_MS` (80 ms).
+
+### Double-buffer design
+
+| Buffer | Who writes | Who reads | Notes |
+|--------|------------|-----------|-------|
+| `dmxBuf[512]` (volatile) | ISR | `fetchDMXFrame()` | Filled byte-by-byte as the frame arrives |
+| `dmxFrame[512]` | `fetchDMXFrame()` | `drawMonitor()` | Stable snapshot; only updated on a complete or partial-but-ended frame |
+
+`fetchDMXFrame()` disables interrupts (`noInterrupts()`) while copying and clearing the ready flag, preventing the ISR from modifying `dmxBuf[]` mid-copy.
+
+### Signal-loss detection
+
+`dmxLastFrameMs` is updated in the main loop every time `fetchDMXFrame()` returns a new frame. If `millis() − dmxLastFrameMs` exceeds `SIGNAL_TIMEOUT_MS` (1 000 ms, approximately 44 missed frames), `signalPresent` becomes false and the LCD switches to the no-signal view. The monitor recovers immediately when frames resume.
+
+### Key constants
+
+```cpp
+const int              DMX_CHANNELS      = 512;    // number of DMX channel slots
+const unsigned long    SIGNAL_TIMEOUT_MS = 1000;   // ms without a frame → signal lost
+const unsigned long    LOOP_DELAY_MS     = 80;     // LCD refresh interval
+// UBRR0L = 3 → 250 000 baud at 16 MHz (adjust for other clock speeds)
+```
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -734,6 +856,10 @@ Connect a passive piezo buzzer (or a transistor-driven active buzzer) between **
 | Buzzer silent at end of Pomodoro period | No buzzer wired to D3 | Connect a passive piezo between D3 and GND |
 | Buzzer silent when kitchen timer expires | No buzzer wired to D3 | Connect a passive piezo between D3 and GND |
 | Clock drifts noticeably | `millis()` accuracy limitation (no RTC) | Re-set the time after long periods; consider adding a DS3231 RTC module for precision |
+| DMX Monitor shows "No DMX signal" | No DMX frame received / D0 not wired | Check MAX485 A/B wiring and XLR connections; verify the DMX source is transmitting; confirm the RO wire is connected to D0 after uploading |
+| DMX Monitor upload fails or hangs | MAX485 RO still connected to D0 | Disconnect the RO wire from D0 before uploading; reconnect afterwards |
+| DMX values stuck at 0 or wrong | Incorrect baud rate (non-16 MHz board) | Recalculate `UBRR0L` using `F_CPU / (16 × 250000) − 1` for your clock speed |
+| DMX values flickering / garbled | Missing 120 Ω termination resistor | Add a 120 Ω resistor across MAX485 A and B terminals |
 
 ---
 
