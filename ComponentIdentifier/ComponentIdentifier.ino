@@ -213,7 +213,7 @@ void dischargeCapacitor() {
   digitalWrite(REF_PIN, LOW);   // discharge via 10 kΩ reference to GND
 
   unsigned long start = millis();
-  while (analogRead(PROBE_A_PIN) > 10 &&
+  while (analogRead(PROBE_A_PIN) > ADC_SHORT_MAX &&
          millis() - start < CAP_DISCHARGE_TIMEOUT_MS) {
     // wait
   }
@@ -259,8 +259,8 @@ float measureCapacitance() {
   unsigned long tauMs = millis() - startMs;
   disableMeasurement();
 
-  // C (µF) = τ (ms) / R (kΩ)  →  τ (ms) / 10
-  return (float)tauMs / (R_REF_OHMS / 1000.0f);
+  // C (µF) = τ (ms) × 1000 / R (Ω)  =  τ (ms) / R (kΩ)
+  return (float)tauMs * 1000.0f / R_REF_OHMS;
 }
 
 // ── Main measurement routine ──────────────────────────────────────────────────
@@ -327,7 +327,7 @@ void printResistance(float ohms) {
   if (ohms < 1.0f) {
     lcd.print("< 1 ohm         ");
   } else if (ohms < 1000.0f) {
-    snprintf(buf, sizeof(buf), "%-5d ohm        ", (int)(ohms + 0.5f));
+    snprintf(buf, sizeof(buf), "%-5d ohm        ", (int)(ohms + 0.5f));  // 0.5f rounds to nearest integer
     lcd.print(buf);
   } else if (ohms < 1000000.0f) {
     dtostrf(ohms / 1000.0f, 5, 2, num);
