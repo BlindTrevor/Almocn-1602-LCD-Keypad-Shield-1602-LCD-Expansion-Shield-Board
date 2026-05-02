@@ -37,8 +37,12 @@
 //   UP    / DOWN   channel ±10
 //   SELECT         jump back to channel 1
 
+// Declare Button before the first #include so the Arduino IDE's
+// auto-generated function prototypes (inserted after the last #include)
+// can see the type definition without needing a separate header file.
+enum Button { BTN_RIGHT, BTN_UP, BTN_DOWN, BTN_LEFT, BTN_SELECT, BTN_NONE };
+
 #include <LiquidCrystal.h>
-#include "ButtonType.h"
 
 // ---------------------------------------------------------------------------
 // Hardware pins
